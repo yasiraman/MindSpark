@@ -2,19 +2,22 @@
 RewriteEngine On
 RewriteBase /
 
-# 1. IMMEDIATE API PROXY - Force these to Node.js
-RewriteRule ^api/(.*) "http://127.0.0.1:3000/api/$1" [P,L]
-RewriteRule ^socket.io/(.*) "http://127.0.0.1:3000/socket.io/$1" [P,L]
+# 1. Proxy API and Socket.IO (Polling)
+RewriteRule ^api/(.*) http://localhost:3000/api/$1 [P,L]
+RewriteRule ^socket.io/(.*) http://localhost:3000/socket.io/$1 [P,L]
 
-# 2. Handle WebSocket Upgrade specifically for socket.io
+# 2. Handle WebSocket Upgrade
 RewriteCond %{HTTP:Upgrade} websocket [NC]
 RewriteCond %{HTTP:Connection} upgrade [NC]
-RewriteRule ^socket.io/(.*) "ws://127.0.0.1:3000/socket.io/$1" [P,L]
+RewriteRule ^socket.io/(.*) ws://localhost:3000/socket.io/$1 [P,L]
 
-# 3. Proxy all other requests to Node.js (if not a static file)
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^(.*)$ "http://127.0.0.1:3000/$1" [P,L]
+# 3. If it's a real file (like index.html or assets), serve it directly
+RewriteCond %{REQUEST_FILENAME} -f
+RewriteRule ^ - [L]
+
+# 4. Proxy everything else to Node.js
+# This ensures Node.js handles SPA routing and API calls correctly
+RewriteRule ^(.*)$ http://localhost:3000/$1 [P,L]
 
 # 5. Security: Prevent access to .env and other sensitive files
 <FilesMatch "^\.">

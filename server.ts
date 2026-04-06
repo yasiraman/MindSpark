@@ -225,8 +225,12 @@ if (process.env.NODE_ENV === "production") {
 }
 
   const PORT = Number(process.env.PORT) || 3000;
-  httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`[SERVER] Running on port ${PORT}`);
+  httpServer.listen(PORT, "localhost", () => {
+    const msg = `[SERVER] Running on http://localhost:${PORT}`;
+    console.log(msg);
+    logToFile(msg);
+    logToFile(`[ENV] NODE_ENV: ${process.env.NODE_ENV}`);
+    logToFile(`[ENV] PORT: ${process.env.PORT}`);
   });
 }
 

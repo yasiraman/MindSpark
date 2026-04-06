@@ -7,21 +7,32 @@ const path = require("path");
 process.env.NODE_ENV = process.env.NODE_ENV || "production";
 process.env.PORT = process.env.PORT || "3000";
 
-console.log(`[SERVER.CJS] Starting in ${process.env.NODE_ENV} mode on port ${process.env.PORT}`);
+const logFile = path.join(__dirname, "server.log");
+const log = (msg) => {
+  const line = `[${new Date().toISOString()}] [CJS] ${msg}\n`;
+  console.log(line.trim());
+  try {
+    fs.appendFileSync(logFile, line);
+  } catch (e) {}
+};
+
+log(`Starting in ${process.env.NODE_ENV} mode on port ${process.env.PORT}`);
+log(`Node version: ${process.version}`);
+log(`Directory: ${__dirname}`);
 
 // Register tsx to handle .ts files on the fly
 try {
   register("tsx/esm", {
     parentURL: `file://${__filename}`,
   });
-  console.log("[SERVER.CJS] tsx/esm registered successfully.");
+  log("tsx/esm registered successfully.");
 } catch (err) {
-  console.error("[SERVER.CJS] Failed to register tsx/esm:", err);
+  log(`Failed to register tsx/esm: ${err.message}`);
 }
 
 // Import the main server (ESM)
 import("./server.ts").then(() => {
-  console.log("[SERVER.CJS] server.ts imported successfully.");
+  log("server.ts imported successfully.");
 }).catch(err => {
-  console.error("[SERVER.CJS] Error importing server.ts:", err);
+  log(`Error importing server.ts: ${err.message}`);
 });
