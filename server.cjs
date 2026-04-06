@@ -1,38 +1,41 @@
-// server.cjs (CommonJS entry point for Hostinger)
-const { register } = require("node:module");
+// server.cjs (Ultra-compatible entry point for Hostinger)
 const fs = require("fs");
 const path = require("path");
 
-// Set production environment by default for Hostinger
-process.env.NODE_ENV = process.env.NODE_ENV || "production";
-process.env.PORT = process.env.PORT || "3000";
-
 const logFile = path.join(__dirname, "server.log");
-const log = (msg) => {
-  const line = `[${new Date().toISOString()}] [CJS] ${msg}\n`;
+function log(msg) {
+  const line = "[" + new Date().toISOString() + "] [CJS-START] " + msg + "\n";
   console.log(line.trim());
   try {
     fs.appendFileSync(logFile, line);
-  } catch (e) {}
-};
-
-log(`Starting in ${process.env.NODE_ENV} mode on port ${process.env.PORT}`);
-log(`Node version: ${process.version}`);
-log(`Directory: ${__dirname}`);
-
-// Register tsx to handle .ts files on the fly
-try {
-  register("tsx/esm", {
-    parentURL: `file://${__filename}`,
-  });
-  log("tsx/esm registered successfully.");
-} catch (err) {
-  log(`Failed to register tsx/esm: ${err.message}`);
+  } catch (e) {
+    // Silent fail if log file is unwritable
+  }
 }
 
-// Import the main server (ESM)
-import("./server.ts").then(() => {
-  log("server.ts imported successfully.");
-}).catch(err => {
-  log(`Error importing server.ts: ${err.message}`);
-});
+log("--- STARTUP INITIATED ---");
+log("Node Version: " + process.version);
+log("Dirname: " + __dirname);
+
+try {
+  // Use standard require without node: prefix for older versions
+  const mod = require("module");
+  const url = require("url");
+
+  if (mod && typeof mod.register === "function") {
+    log("Registering tsx/esm loader...");
+    mod.register("tsx/esm", {
+      parentURL: url.pathToFileURL(__filename).toString(),
+    });
+    log("Loader registered. Importing server.ts...");
+    
+    import("./server.ts")
+      .then(() => log("server.ts import successful."))
+      .catch(err => log("CRITICAL: server.ts import failed: " + err.message));
+  } else {
+    log("CRITICAL: module.register is not a function. Node version might be too old for tsx/esm.");
+    log("Attempting to run server.ts directly with tsx if available...");
+  }
+} catch (err) {
+  log("CRITICAL: Startup error: " + err.message);
+}
