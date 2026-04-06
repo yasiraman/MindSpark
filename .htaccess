@@ -1,0 +1,18 @@
+# .htaccess for Hostinger Node.js Proxy
+RewriteEngine On
+
+# 1. Handle WebSocket Upgrade specifically for socket.io
+RewriteCond %{HTTP:Upgrade} websocket [NC]
+RewriteCond %{HTTP:Connection} upgrade [NC]
+RewriteRule ^socket.io/(.*) "ws://127.0.0.1:3000/socket.io/$1" [P,L]
+
+# 2. Proxy all other requests to Node.js
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ "http://127.0.0.1:3000/$1" [P,L]
+
+# 3. Security: Prevent access to .env and other sensitive files
+<FilesMatch "^\.">
+    Order allow,deny
+    Deny from all
+</FilesMatch>

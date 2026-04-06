@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Socket.IO Diagnostic</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        body { font-family: sans-serif; padding: 20px; line-height: 1.6; }
+        #log { background: #f4f4f4; padding: 10px; border-radius: 5px; height: 300px; overflow-y: auto; font-family: monospace; }
+        .success { color: green; font-weight: bold; }
+        .error { color: red; font-weight: bold; }
+        button { padding: 10px 20px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>Socket.IO Diagnostic Tool</h1>
+    <p>Current Origin: <span id="origin"></span></p>
+    <div id="controls">
+        <button onclick="connect('auto')">Connect (Auto)</button>
+        <button onclick="connect('websocket')">Connect (WebSocket Only)</button>
+    </div>
+    <hr>
+    <div id="log"></div>
+
+    <script>
+        document.getElementById('origin').innerText = window.location.origin;
+        const logDiv = document.getElementById('log');
+
+        function log(msg, type = '') {
+            const div = document.createElement('div');
+            div.className = type;
+            div.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logDiv.appendChild(div);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        let socket;
+
+        function connect(mode) {
+            if (socket) socket.disconnect();
+            
+            log(`Attempting connection (Mode: ${mode})...`);
+            
+            socket = io({
+                path: '/socket.io',
+                transports: mode === 'websocket' ? ['websocket'] : ['polling', 'websocket'],
+                reconnectionAttempts: 3
+            });
+
+            socket.on('connect', () => {
+                log(`CONNECTED! ID: ${socket.id}`, 'success');
+                log(`Transport used: ${socket.io.engine.transport.name}`);
+            });
+
+            socket.on('connect_error', (err) => {
+                log(`CONNECTION ERROR: ${err.message}`, 'error');
+                console.error(err);
+            });
+
+            socket.on('disconnect', (reason) => {
+                log(`DISCONNECTED: ${reason}`);
+            });
+        }
+    </script>
+</body>
+</html>
