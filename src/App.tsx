@@ -170,22 +170,34 @@ export default function App() {
 
   // Shared Socket Initialization
   useEffect(() => {
-    const s = io({
+    console.log("[SOCKET] Initializing connection to:", window.location.origin);
+    
+    const s = io(window.location.origin, {
+      path: "/socket.io",
       transports: transportMode === "auto" ? ["polling", "websocket"] : ["polling"],
       reconnectionAttempts: 10,
-      timeout: 20000
-    });
-
-    s.on("connect_error", (err) => {
-      console.error("Socket Error:", err.message);
-      showNotification(`Connection failed: ${err.message}`, "error");
+      timeout: 20000,
+      withCredentials: true,
+      forceNew: true
     });
 
     s.on("connect", () => {
-      showNotification("Connected to server", "success");
+      console.log("[SOCKET] Connected successfully with transport:", s.io.engine.transport.name);
+      showNotification(`Connected via ${s.io.engine.transport.name}`, "success");
+    });
+
+    s.on("connect_error", (err) => {
+      console.error("[SOCKET] Connection Error:", err);
+      showNotification(`Connection failed: ${err.message}`, "error");
+      
+      // If it's a polling error, suggest switching to polling only if not already
+      if (err.message.includes("xhr poll error") && transportMode === "auto") {
+        console.log("[SOCKET] Polling error detected, attempting to fallback...");
+      }
     });
 
     s.on("disconnect", (reason) => {
+      console.log("[SOCKET] Disconnected:", reason);
       if (reason === "io server disconnect") {
         showNotification("Disconnected by server", "error");
       } else {
@@ -196,6 +208,21 @@ export default function App() {
     setSocket(s);
     return () => { s.disconnect(); };
   }, [transportMode]);
+
+  const testApi = async () => {
+    try {
+      showNotification("Testing API connectivity...", "info");
+      const res = await fetch("/api/health");
+      const data = await res.json();
+      if (data.status === "ok") {
+        showNotification("API is reachable!", "success");
+      } else {
+        showNotification("API returned unexpected response", "error");
+      }
+    } catch (err) {
+      showNotification(`API Unreachable: ${err instanceof Error ? err.message : String(err)}`, "error");
+    }
+  };
 
   if (view === "landing") {
     return (
@@ -237,6 +264,13 @@ export default function App() {
               <Play size={28} /> HOST GAME
             </button>
           </div>
+          
+          <button 
+            onClick={testApi}
+            className="mt-8 text-indigo-300 font-bold text-sm hover:text-white transition-all flex items-center gap-2 mx-auto"
+          >
+            <RefreshCw size={14} /> TEST API CONNECTIVITY
+          </button>
         </motion.div>
         
         <AnimatePresence>
