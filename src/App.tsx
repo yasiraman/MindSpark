@@ -212,12 +212,16 @@ export default function App() {
   const testApi = async () => {
     try {
       showNotification("Testing API connectivity...", "info");
-      const res = await fetch("/api/health");
-      const data = await res.json();
-      if (data.status === "ok") {
+      const res = await fetch("/api/v1/test-text");
+      const text = await res.text();
+      
+      if (text.includes("API_IS_WORKING_FINE")) {
         showNotification("API is reachable!", "success");
+      } else if (text.includes("<!DOCTYPE html>")) {
+        showNotification("API Error: Received HTML instead of API response. Proxy is NOT working.", "error");
+        console.error("[API ERROR] Received HTML. This usually means Apache is serving index.html instead of proxying to Node.js.");
       } else {
-        showNotification("API returned unexpected response", "error");
+        showNotification(`API returned unexpected response: ${text.slice(0, 50)}...`, "error");
       }
     } catch (err) {
       showNotification(`API Unreachable: ${err instanceof Error ? err.message : String(err)}`, "error");

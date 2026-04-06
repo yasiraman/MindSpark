@@ -180,6 +180,10 @@ io.on("connection", (socket) => {
 });
 
 // API Routes
+app.get("/api/v1/test-text", (req, res) => {
+  res.send("API_IS_WORKING_FINE");
+});
+
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
 });
