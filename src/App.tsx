@@ -79,6 +79,25 @@ const SHAPES = ["▲", "◆", "●", "■"];
 
 // --- COMPONENTS ---
 
+const Toast = ({ message, type, onClose }: { message: string; type: "error" | "info" | "success"; onClose: () => void }) => (
+  <motion.div
+    initial={{ y: 50, opacity: 0 }}
+    animate={{ y: 0, opacity: 1 }}
+    exit={{ y: 50, opacity: 0 }}
+    className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 backdrop-blur-md border ${
+      type === "error" ? "bg-red-500/90 border-red-400 text-white" : 
+      type === "success" ? "bg-green-500/90 border-green-400 text-white" :
+      "bg-indigo-600/90 border-indigo-400 text-white"
+    }`}
+  >
+    {type === "error" ? <AlertCircle size={20} /> : type === "success" ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
+    <span className="font-bold text-sm">{message}</span>
+    <button onClick={onClose} className="ml-2 opacity-50 hover:opacity-100">
+      <XCircle size={16} />
+    </button>
+  </motion.div>
+);
+
 const DebugInfo = ({ socket, transportMode, setTransportMode }: { 
   socket: Socket | null, 
   transportMode: string, 
@@ -142,7 +161,12 @@ export default function App() {
   const [view, setView] = useState<"landing" | "host" | "player">("landing");
   const [socket, setSocket] = useState<Socket | null>(null);
   const [transportMode, setTransportMode] = useState<string>("auto");
-  const [error, setError] = useState<string | null>(null);
+  const [notification, setNotification] = useState<{ message: string; type: "error" | "info" | "success" } | null>(null);
+
+  const showNotification = (message: string, type: "error" | "info" | "success" = "info") => {
+    setNotification({ message, type });
+    setTimeout(() => setNotification(null), 5000);
+  };
 
   // Shared Socket Initialization
   useEffect(() => {
@@ -154,7 +178,19 @@ export default function App() {
 
     s.on("connect_error", (err) => {
       console.error("Socket Error:", err.message);
-      setError(`Connection failed: ${err.message}`);
+      showNotification(`Connection failed: ${err.message}`, "error");
+    });
+
+    s.on("connect", () => {
+      showNotification("Connected to server", "success");
+    });
+
+    s.on("disconnect", (reason) => {
+      if (reason === "io server disconnect") {
+        showNotification("Disconnected by server", "error");
+      } else {
+        showNotification("Connection lost. Reconnecting...", "info");
+      }
     });
 
     setSocket(s);
@@ -203,6 +239,16 @@ export default function App() {
           </div>
         </motion.div>
         
+        <AnimatePresence>
+          {notification && (
+            <Toast 
+              message={notification.message} 
+              type={notification.type} 
+              onClose={() => setNotification(null)} 
+            />
+          )}
+        </AnimatePresence>
+
         <DebugInfo socket={socket} transportMode={transportMode} setTransportMode={setTransportMode} />
       </div>
     );
@@ -211,17 +257,32 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-100">
       {view === "host" ? (
-        <HostView socket={socket} onExit={() => setView("landing")} />
+        <HostView socket={socket} onExit={() => setView("landing")} showNotification={showNotification} />
       ) : (
-        <PlayerView socket={socket} onExit={() => setView("landing")} />
+        <PlayerView socket={socket} onExit={() => setView("landing")} showNotification={showNotification} />
       )}
+      
+      <AnimatePresence>
+        {notification && (
+          <Toast 
+            message={notification.message} 
+            type={notification.type} 
+            onClose={() => setNotification(null)} 
+          />
+        )}
+      </AnimatePresence>
+
       <DebugInfo socket={socket} transportMode={transportMode} setTransportMode={setTransportMode} />
     </div>
   );
 }
 
 // --- HOST VIEW ---
-function HostView({ socket, onExit }: { socket: Socket | null, onExit: () => void }) {
+function HostView({ socket, onExit, showNotification }: { 
+  socket: Socket | null, 
+  onExit: () => void,
+  showNotification: (m: string, t?: "error" | "info" | "success") => void 
+}) {
   const [game, setGame] = useState<GameState | null>(null);
   const [answeredCount, setAnsweredCount] = useState(0);
 
@@ -238,6 +299,7 @@ function HostView({ socket, onExit }: { socket: Socket | null, onExit: () => voi
         totalQuestions: questions.length,
         players: []
       });
+      showNotification(`Game created! Pin: ${pin}`, "success");
     });
 
     socket.on("host:player-joined", (players: Player[]) => {
@@ -254,6 +316,7 @@ function HostView({ socket, onExit }: { socket: Socket | null, onExit: () => voi
         correctAnswer: undefined
       } : null);
       setAnsweredCount(0);
+      showNotification("The game has started!", "info");
     });
 
     socket.on("host:answer-received", ({ answeredCount }) => {
@@ -282,6 +345,11 @@ function HostView({ socket, onExit }: { socket: Socket | null, onExit: () => voi
         spread: 70,
         origin: { y: 0.6 }
       });
+      showNotification("Game completed! Check the podium.", "success");
+    });
+
+    socket.on("player:error", (msg) => {
+      showNotification(msg, "error");
     });
 
     return () => {
@@ -464,11 +532,14 @@ function HostView({ socket, onExit }: { socket: Socket | null, onExit: () => voi
 }
 
 // --- PLAYER VIEW ---
-function PlayerView({ socket, onExit }: { socket: Socket | null, onExit: () => void }) {
+function PlayerView({ socket, onExit, showNotification }: { 
+  socket: Socket | null, 
+  onExit: () => void,
+  showNotification: (m: string, t?: "error" | "info" | "success") => void 
+}) {
   const [pin, setPin] = useState("");
   const [name, setName] = useState("");
   const [status, setStatus] = useState<"join" | "lobby" | "playing" | "results" | "ended">("join");
-  const [error, setError] = useState<string | null>(null);
   const [currentQuestion, setCurrentQuestion] = useState<any>(null);
   const [hasAnswered, setHasAnswered] = useState(false);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
@@ -479,11 +550,11 @@ function PlayerView({ socket, onExit }: { socket: Socket | null, onExit: () => v
 
     socket.on("player:joined", () => {
       setStatus("lobby");
-      setError(null);
+      showNotification("Successfully joined the game!", "success");
     });
 
     socket.on("player:error", (msg) => {
-      setError(msg);
+      showNotification(msg, "error");
     });
 
     socket.on("game:started", ({ question }) => {
@@ -536,6 +607,7 @@ function PlayerView({ socket, onExit }: { socket: Socket | null, onExit: () => v
     if (!hasAnswered) {
       setHasAnswered(true);
       socket?.emit("player:answer", { pin, answerIndex: index });
+      showNotification("Answer submitted!", "success");
     }
   };
 
@@ -567,11 +639,6 @@ function PlayerView({ socket, onExit }: { socket: Socket | null, onExit: () => v
                 className="w-full p-5 bg-gray-100 rounded-2xl text-2xl font-black text-center focus:ring-4 ring-indigo-300 outline-none transition-all"
               />
             </div>
-            {error && (
-              <div className="flex items-center gap-2 text-red-500 bg-red-50 p-3 rounded-xl text-sm font-bold">
-                <AlertCircle size={16} /> {error}
-              </div>
-            )}
             <button 
               type="submit"
               className="w-full py-5 bg-indigo-900 text-white rounded-2xl font-black text-2xl shadow-xl hover:scale-105 transition-all active:scale-95"

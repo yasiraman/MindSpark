@@ -204,7 +204,7 @@ if (process.env.NODE_ENV === "production") {
   app.use(vite.middlewares);
 }
 
-  const PORT = process.env.PORT || 3000;
+  const PORT = Number(process.env.PORT) || 3000;
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`[SERVER] Running on port ${PORT}`);
   });
