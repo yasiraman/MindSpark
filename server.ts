@@ -14,10 +14,26 @@ async function startServer() {
   const app = express();
   const httpServer = createServer(app);
 
+  const logToFile = (msg: string) => {
+    try {
+      fs.appendFileSync("server.log", `[${new Date().toISOString()}] ${msg}\n`);
+    } catch (e) {
+      console.error("Failed to write to server.log:", e);
+    }
+  };
+
+  logToFile(`[SERVER] Initializing in ${process.env.NODE_ENV} mode...`);
+  console.log(`[SERVER] Initializing in ${process.env.NODE_ENV} mode...`);
+
 // Trust proxy for Hostinger/Nginx
 app.set("trust proxy", true);
 
 app.use(express.json());
+app.use((req, res, next) => {
+  logToFile(`[REQUEST] ${req.method} ${req.url} - Origin: ${req.headers.origin}`);
+  console.log(`[REQUEST] ${req.method} ${req.url} - Origin: ${req.headers.origin}`);
+  next();
+});
 app.use(cors({
   origin: true, // Echo back origin for credentials
   credentials: true

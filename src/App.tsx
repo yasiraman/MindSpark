@@ -218,10 +218,10 @@ export default function App() {
       if (text.includes("API_IS_WORKING_FINE")) {
         showNotification("API is reachable!", "success");
       } else if (text.includes("<!DOCTYPE html>")) {
-        showNotification("API Error: Received HTML instead of API response. Proxy is NOT working.", "error");
-        console.error("[API ERROR] Received HTML. This usually means Apache is serving index.html instead of proxying to Node.js.");
+        showNotification("API Error: Received HTML. Proxy is NOT working.", "error");
+        console.error("[API ERROR] Received HTML. This means Apache is serving index.html instead of proxying to Node.js. Check if your Node.js app is running on port 3000 and if .htaccess is in the correct folder.");
       } else {
-        showNotification(`API returned unexpected response: ${text.slice(0, 50)}...`, "error");
+        showNotification(`API returned: ${text.slice(0, 30)}...`, "error");
       }
     } catch (err) {
       showNotification(`API Unreachable: ${err instanceof Error ? err.message : String(err)}`, "error");

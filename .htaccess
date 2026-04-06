@@ -2,18 +2,16 @@
 RewriteEngine On
 RewriteBase /
 
-# 1. Handle WebSocket Upgrade specifically for socket.io
+# 1. IMMEDIATE API PROXY - Force these to Node.js
+RewriteRule ^api/(.*) "http://127.0.0.1:3000/api/$1" [P,L]
+RewriteRule ^socket.io/(.*) "http://127.0.0.1:3000/socket.io/$1" [P,L]
+
+# 2. Handle WebSocket Upgrade specifically for socket.io
 RewriteCond %{HTTP:Upgrade} websocket [NC]
 RewriteCond %{HTTP:Connection} upgrade [NC]
 RewriteRule ^socket.io/(.*) "ws://127.0.0.1:3000/socket.io/$1" [P,L]
 
-# 2. Handle Socket.IO Polling (XHR)
-RewriteRule ^socket.io/(.*) "http://127.0.0.1:3000/socket.io/$1" [P,L]
-
-# 3. Handle API routes
-RewriteRule ^api/(.*) "http://127.0.0.1:3000/api/$1" [P,L]
-
-# 4. Proxy all other requests to Node.js (if not a static file)
+# 3. Proxy all other requests to Node.js (if not a static file)
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^(.*)$ "http://127.0.0.1:3000/$1" [P,L]
