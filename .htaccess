@@ -2,24 +2,20 @@
 RewriteEngine On
 RewriteBase /
 
-# 1. Proxy API and Socket.IO (Polling)
-RewriteRule ^api/(.*) http://localhost:3000/api/$1 [P,L]
-RewriteRule ^socket.io/(.*) http://localhost:3000/socket.io/$1 [P,L]
+# 1. Handle WebSocket Upgrade (Socket.IO)
+# We check for the Upgrade header OR the transport=websocket query parameter
+RewriteCond %{HTTP:Upgrade} websocket [NC,OR]
+RewriteCond %{QUERY_STRING} transport=websocket [NC]
+RewriteRule ^socket.io(.*) ws://localhost:3000/socket.io$1 [P,L]
 
-# 2. Handle WebSocket Upgrade
-RewriteCond %{HTTP:Upgrade} websocket [NC]
-RewriteCond %{HTTP:Connection} upgrade [NC]
-RewriteRule ^socket.io/(.*) ws://localhost:3000/socket.io/$1 [P,L]
-
-# 3. If it's a real file (like index.html or assets), serve it directly
+# 2. If it's a real file (like index.html or assets), serve it directly
 RewriteCond %{REQUEST_FILENAME} -f
 RewriteRule ^ - [L]
 
-# 4. Proxy everything else to Node.js
-# This ensures Node.js handles SPA routing and API calls correctly
-RewriteRule ^(.*)$ http://localhost:3000/$1 [P,L]
+# 3. Proxy everything else to Node.js (API, Polling, SPA)
+RewriteRule ^(.*)$ http://localhost:3000/$1 [P,L,QSA]
 
-# 5. Security: Prevent access to .env and other sensitive files
+# 4. Security: Prevent access to .env and other sensitive files
 <FilesMatch "^\.">
     Order allow,deny
     Deny from all

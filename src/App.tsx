@@ -173,7 +173,7 @@ export default function App() {
     console.log("[SOCKET] Initializing connection to:", window.location.origin);
     
     const s = io(window.location.origin, {
-      path: "/socket.io",
+      path: "/socket.io", // Default path
       transports: transportMode === "auto" ? ["polling", "websocket"] : ["polling"],
       reconnectionAttempts: 10,
       timeout: 20000,
@@ -188,11 +188,13 @@ export default function App() {
 
     s.on("connect_error", (err) => {
       console.error("[SOCKET] Connection Error:", err);
-      showNotification(`Connection failed: ${err.message}`, "error");
+      // Detailed error logging
+      const errorMsg = `Connection failed: ${err.message}${err.description ? ` (${err.description})` : ""}`;
+      showNotification(errorMsg, "error");
       
       // If it's a polling error, suggest switching to polling only if not already
-      if (err.message.includes("xhr poll error") && transportMode === "auto") {
-        console.log("[SOCKET] Polling error detected, attempting to fallback...");
+      if (err.message.includes("xhr poll error") || err.message.includes("server error")) {
+        console.log("[SOCKET] Polling/Server error detected, check server logs and .htaccess proxy rules.");
       }
     });
 

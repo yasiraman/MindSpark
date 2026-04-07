@@ -34,13 +34,19 @@ app.set("trust proxy", true);
 
 app.use(express.json());
 app.use((req, res, next) => {
-  logToFile(`[REQUEST] ${req.method} ${req.url} - Origin: ${req.headers.origin}`);
-  console.log(`[REQUEST] ${req.method} ${req.url} - Origin: ${req.headers.origin}`);
+  const logMsg = `[REQUEST] ${req.method} ${req.url} - Origin: ${req.headers.origin} - Host: ${req.headers.host} - Upgrade: ${req.headers.upgrade} - Transport: ${req.query.transport}`;
+  logToFile(logMsg);
+  console.log(logMsg);
   next();
 });
 app.use(cors({
-  origin: true, // Echo back origin for credentials
-  credentials: true
+  origin: (origin, callback) => {
+    // Echo back origin or allow all for debugging
+    callback(null, true);
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
 }));
 
 // AI Question Generation Route
@@ -85,13 +91,27 @@ app.post("/api/v1/generate-questions", async (req, res) => {
 });
 
 const io = new Server(httpServer, {
+  path: "/socket.io",
   cors: {
-    origin: "*",
-    credentials: true
+    origin: (origin, callback) => {
+      // Echo back origin or allow all for debugging
+      callback(null, true);
+    },
+    credentials: true,
+    methods: ["GET", "POST"],
+    allowedHeaders: ["content-type", "authorization", "x-requested-with"]
   },
   pingTimeout: 60000,
   pingInterval: 25000,
-  transports: ["polling", "websocket"] // Polling first for better proxy compatibility
+  transports: ["polling", "websocket"],
+  allowEIO3: true
+});
+
+// Engine.io logging
+io.engine.on("connection_error", (err) => {
+  const msg = `[SOCKET ERROR] Connection Error: ${err.code} - ${err.message} - ${err.context}`;
+  console.error(msg);
+  logToFile(msg);
 });
 
 // Game State
@@ -241,6 +261,16 @@ io.on("connection", (socket) => {
 });
 
 // API Routes
+app.get("/api/v1/test-origin", (req, res) => {
+  res.json({
+    origin: req.headers.origin,
+    host: req.headers.host,
+    xForwardedFor: req.headers["x-forwarded-for"],
+    xForwardedProto: req.headers["x-forwarded-proto"],
+    remoteAddress: req.socket.remoteAddress
+  });
+});
+
 app.get("/api/v1/test-text", (req, res) => {
   res.send("API_IS_WORKING_FINE");
 });
