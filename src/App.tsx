@@ -1,3 +1,4 @@
+// QuizSpark v2.0 - REST API Version
 import React, { useState, useEffect, useRef } from "react";
 import { 
   Trophy, 
