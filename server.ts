@@ -92,10 +92,11 @@ setInterval(() => {
   }
 }, 60000);
 
-// --- GAME API ENDPOINTS ---
+// --- API ROUTER ---
+const apiRouter = express.Router();
 
 // Create Game
-app.post("/api/v1/game/create", (req, res) => {
+apiRouter.post("/game/create", (req, res) => {
   const { questions, hostId } = req.body;
   if (!questions || !hostId) return res.status(400).json({ error: "Missing questions or hostId" });
 
@@ -114,7 +115,7 @@ app.post("/api/v1/game/create", (req, res) => {
 });
 
 // Join Game
-app.post("/api/v1/game/join", (req, res) => {
+apiRouter.post("/game/join", (req, res) => {
   const { pin, name, playerId } = req.body;
   const game = games.get(pin);
 
@@ -132,7 +133,7 @@ app.post("/api/v1/game/join", (req, res) => {
 });
 
 // Start Game
-app.post("/api/v1/game/start", (req, res) => {
+apiRouter.post("/game/start", (req, res) => {
   const { pin, hostId } = req.body;
   const game = games.get(pin);
 
@@ -145,7 +146,7 @@ app.post("/api/v1/game/start", (req, res) => {
 });
 
 // Submit Answer
-app.post("/api/v1/game/answer", (req, res) => {
+apiRouter.post("/game/answer", (req, res) => {
   const { pin, playerId, answerIndex } = req.body;
   const game = games.get(pin);
 
@@ -178,7 +179,7 @@ app.post("/api/v1/game/answer", (req, res) => {
 });
 
 // Next Question
-app.post("/api/v1/game/next", (req, res) => {
+apiRouter.post("/game/next", (req, res) => {
   const { pin, hostId } = req.body;
   const game = games.get(pin);
 
@@ -201,7 +202,7 @@ app.post("/api/v1/game/next", (req, res) => {
 });
 
 // Get Game State (Polling)
-app.get("/api/v1/game/:pin", (req, res) => {
+apiRouter.get("/game/:pin", (req, res) => {
   const { pin } = req.params;
   const { playerId, hostId } = req.query;
   const game = games.get(pin);
@@ -240,7 +241,7 @@ app.get("/api/v1/game/:pin", (req, res) => {
 });
 
 // AI Question Generation Route
-app.post("/api/v1/generate-questions", async (req, res) => {
+apiRouter.post("/generate-questions", async (req, res) => {
   const { topic, count = 5 } = req.body;
   
   if (!process.env.GEMINI_API_KEY) {
@@ -280,8 +281,7 @@ app.post("/api/v1/generate-questions", async (req, res) => {
   }
 });
 
-// API Routes
-app.get("/api/v1/test-origin", (req, res) => {
+apiRouter.get("/test-origin", (req, res) => {
   res.json({
     origin: req.headers.origin,
     host: req.headers.host,
@@ -291,8 +291,20 @@ app.get("/api/v1/test-origin", (req, res) => {
   });
 });
 
-app.get("/api/v1/test-text", (req, res) => {
-  res.send("API_IS_WORKING_FINE");
+apiRouter.get("/test-text", (req, res) => {
+  res.send("API_IS_WORKING_FINE_V2");
+});
+
+// Mount API Router
+app.use("/api/v1", apiRouter);
+
+// Specific 404 for API routes to prevent HTML fallback
+app.use("/api", (req, res) => {
+  res.status(404).json({ 
+    error: "API endpoint not found", 
+    method: req.method, 
+    path: req.originalUrl 
+  });
 });
 
 app.get("/api/health", (req, res) => {
