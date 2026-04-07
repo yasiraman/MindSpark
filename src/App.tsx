@@ -323,6 +323,31 @@ function HostView({ socket, onExit, showNotification }: {
 }) {
   const [game, setGame] = useState<GameState | null>(null);
   const [answeredCount, setAnsweredCount] = useState(0);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [topic, setTopic] = useState("");
+
+  const generateWithAI = async () => {
+    if (!topic) return showNotification("Please enter a topic", "error");
+    
+    setIsGenerating(true);
+    try {
+      const res = await fetch("/api/v1/generate-questions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic })
+      });
+      
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      
+      socket?.emit("host:create", data);
+      showNotification(`Generated ${data.length} questions about ${topic}!`, "success");
+    } catch (err) {
+      showNotification(`AI Error: ${err instanceof Error ? err.message : String(err)}`, "error");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   useEffect(() => {
     if (!socket) return;
@@ -423,6 +448,29 @@ function HostView({ socket, onExit, showNotification }: {
         </div>
 
         <div className="flex-1 overflow-y-auto mb-8">
+          <div className="max-w-xl mx-auto mb-12 bg-white/10 p-6 rounded-3xl backdrop-blur-md border border-white/10">
+            <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+              <RefreshCw size={20} className={isGenerating ? "animate-spin" : ""} />
+              GENERATE CUSTOM QUIZ WITH AI
+            </h3>
+            <div className="flex gap-3">
+              <input 
+                type="text" 
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                placeholder="Enter topic (e.g. Space, History, Anime...)"
+                className="flex-1 bg-white/10 border border-white/20 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-white/50 placeholder:text-white/30"
+              />
+              <button 
+                onClick={generateWithAI}
+                disabled={isGenerating}
+                className="bg-white text-indigo-900 px-6 py-3 rounded-xl font-black hover:scale-105 transition-all disabled:opacity-50"
+              >
+                {isGenerating ? "GENERATING..." : "GENERATE"}
+              </button>
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
             <AnimatePresence>
               {game.players.map((p) => (

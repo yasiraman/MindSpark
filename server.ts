@@ -10,6 +10,10 @@ import { createServer as createViteServer } from "vite";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+import { GoogleGenAI } from "@google/genai";
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+
 async function startServer() {
   const app = express();
   const httpServer = createServer(app);
@@ -38,6 +42,47 @@ app.use(cors({
   origin: true, // Echo back origin for credentials
   credentials: true
 }));
+
+// AI Question Generation Route
+app.post("/api/v1/generate-questions", async (req, res) => {
+  const { topic, count = 5 } = req.body;
+  
+  if (!process.env.GEMINI_API_KEY) {
+    return res.status(500).json({ error: "GEMINI_API_KEY not configured on server" });
+  }
+
+  try {
+    const prompt = `Generate a quiz with ${count} multiple-choice questions about "${topic}". 
+    Return ONLY a JSON array of objects with this structure:
+    [
+      {
+        "text": "Question text",
+        "options": ["Option 1", "Option 2", "Option 3", "Option 4"],
+        "correctAnswer": 0, // index of the correct option
+        "timeLimit": 20
+      }
+    ]
+    Ensure the questions are fun and engaging. Do not include any markdown formatting or extra text.`;
+
+    const result = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: [{ parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: "application/json"
+      }
+    });
+
+    const responseText = result.text;
+    if (!responseText) throw new Error("No response from AI");
+    
+    const questions = JSON.parse(responseText);
+    res.json(questions);
+  } catch (error) {
+    console.error("[AI ERROR]", error);
+    logToFile(`[AI ERROR] ${error instanceof Error ? error.message : String(error)}`);
+    res.status(500).json({ error: "Failed to generate questions with AI" });
+  }
+});
 
 const io = new Server(httpServer, {
   cors: {
