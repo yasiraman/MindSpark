@@ -86,7 +86,7 @@ app.post("/api/v1/generate-questions", async (req, res) => {
 
 const io = new Server(httpServer, {
   cors: {
-    origin: true,
+    origin: "*",
     credentials: true
   },
   pingTimeout: 60000,
