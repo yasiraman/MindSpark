@@ -218,15 +218,18 @@ if (process.env.NODE_ENV === "production") {
 } else {
   // Vite middleware for development
   const vite = await createViteServer({
-    server: { middlewareMode: true },
+    server: { 
+      middlewareMode: true,
+      hmr: false // Disable HMR to avoid port conflicts
+    },
     appType: "spa",
   });
   app.use(vite.middlewares);
 }
 
   const PORT = Number(process.env.PORT) || 3000;
-  httpServer.listen(PORT, "localhost", () => {
-    const msg = `[SERVER] Running on http://localhost:${PORT}`;
+  httpServer.listen(PORT, "0.0.0.0", () => {
+    const msg = `[SERVER] Running on http://0.0.0.0:${PORT}`;
     console.log(msg);
     logToFile(msg);
     logToFile(`[ENV] NODE_ENV: ${process.env.NODE_ENV}`);
