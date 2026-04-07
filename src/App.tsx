@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from "react";
-import { io, Socket } from "socket.io-client";
 import { 
   Trophy, 
   Users, 
@@ -15,10 +14,12 @@ import {
   AlertCircle,
   Wifi,
   WifiOff,
-  RefreshCw
+  RefreshCw,
+  Loader2
 } from "lucide-react";
 import confetti from "canvas-confetti";
 import { motion, AnimatePresence } from "framer-motion";
+import { v4 as uuidv4 } from "uuid";
 
 // --- TYPES ---
 interface Question {
@@ -98,118 +99,28 @@ const Toast = ({ message, type, onClose }: { message: string; type: "error" | "i
   </motion.div>
 );
 
-const DebugInfo = ({ socket, transportMode, setTransportMode }: { 
-  socket: Socket | null, 
-  transportMode: string, 
-  setTransportMode: (m: string) => void 
-}) => {
-  const [status, setStatus] = useState("DISCONNECTED");
-  const [transport, setTransport] = useState("none");
-
-  useEffect(() => {
-    if (!socket) return;
-    const update = () => {
-      setStatus(socket.connected ? "CONNECTED" : "DISCONNECTED");
-      setTransport(socket.io?.engine?.transport?.name || "none");
-    };
-    socket.on("connect", update);
-    socket.on("disconnect", update);
-    const interval = setInterval(update, 1000);
-    return () => {
-      socket.off("connect", update);
-      socket.off("disconnect", update);
-      clearInterval(interval);
-    };
-  }, [socket]);
-
-  return (
-    <div className="fixed bottom-4 right-4 bg-black/80 text-white p-4 rounded-xl text-xs font-mono z-50 border border-white/20 backdrop-blur-sm shadow-2xl">
-      <div className="flex items-center gap-2 mb-2">
-        <div className={`w-2 h-2 rounded-full ${status === "CONNECTED" ? "bg-green-500 animate-pulse" : "bg-red-500"}`} />
-        <span className="font-bold uppercase tracking-wider">{status}</span>
-      </div>
-      <div className="space-y-1 opacity-80">
-        <p>Transport: <span className="text-blue-400">{transport}</span></p>
-        <p>Mode: <span className="text-purple-400">{transportMode}</span></p>
-        <p>ID: <span className="text-gray-400">{socket?.id?.slice(0, 8) || "N/A"}</span></p>
-      </div>
-      <div className="flex gap-2 mt-3">
-        <button 
-          onClick={() => setTransportMode("auto")}
-          className={`px-2 py-1 rounded border ${transportMode === "auto" ? "bg-white text-black border-white" : "border-white/30 hover:bg-white/10"}`}
-        >
-          Auto
-        </button>
-        <button 
-          onClick={() => setTransportMode("polling")}
-          className={`px-2 py-1 rounded border ${transportMode === "polling" ? "bg-white text-black border-white" : "border-white/30 hover:bg-white/10"}`}
-        >
-          Poll
-        </button>
-        <button 
-          onClick={() => window.location.reload()}
-          className="px-2 py-1 rounded border border-red-500/50 text-red-400 hover:bg-red-500/10 flex items-center gap-1"
-        >
-          <RefreshCw size={10} /> Reset
-        </button>
-      </div>
-    </div>
-  );
-};
-
 export default function App() {
   const [view, setView] = useState<"landing" | "host" | "player">("landing");
-  const [socket, setSocket] = useState<Socket | null>(null);
-  const [transportMode, setTransportMode] = useState<string>("auto");
   const [notification, setNotification] = useState<{ message: string; type: "error" | "info" | "success" } | null>(null);
+  const [playerId] = useState(() => {
+    const saved = localStorage.getItem("quiz_player_id");
+    if (saved) return saved;
+    const id = uuidv4();
+    localStorage.setItem("quiz_player_id", id);
+    return id;
+  });
+  const [hostId] = useState(() => {
+    const saved = localStorage.getItem("quiz_host_id");
+    if (saved) return saved;
+    const id = uuidv4();
+    localStorage.setItem("quiz_host_id", id);
+    return id;
+  });
 
   const showNotification = (message: string, type: "error" | "info" | "success" = "info") => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 5000);
   };
-
-  // Shared Socket Initialization
-  useEffect(() => {
-    console.log("[SOCKET] Initializing connection to:", window.location.origin);
-    
-    const s = io(window.location.origin, {
-      path: "/socket.io", // Default path
-      transports: transportMode === "auto" ? ["polling", "websocket"] : ["polling"],
-      reconnectionAttempts: 10,
-      timeout: 20000,
-      withCredentials: true,
-      forceNew: true
-    });
-
-    s.on("connect", () => {
-      console.log("[SOCKET] Connected successfully with transport:", s.io.engine.transport.name);
-      showNotification(`Connected via ${s.io.engine.transport.name}`, "success");
-    });
-
-    s.on("connect_error", (err) => {
-      console.error("[SOCKET] Connection Error:", err);
-      // Detailed error logging
-      const errorMsg = `Connection failed: ${err.message}${err.description ? ` (${err.description})` : ""}`;
-      showNotification(errorMsg, "error");
-      
-      // If it's a polling error, suggest switching to polling only if not already
-      if (err.message.includes("xhr poll error") || err.message.includes("server error")) {
-        console.log("[SOCKET] Polling/Server error detected, check server logs and .htaccess proxy rules.");
-      }
-    });
-
-    s.on("disconnect", (reason) => {
-      console.log("[SOCKET] Disconnected:", reason);
-      if (reason === "io server disconnect") {
-        showNotification("Disconnected by server", "error");
-      } else {
-        showNotification("Connection lost. Reconnecting...", "info");
-      }
-    });
-
-    setSocket(s);
-    return () => { s.disconnect(); };
-  }, [transportMode]);
 
   const testApi = async () => {
     try {
@@ -219,9 +130,6 @@ export default function App() {
       
       if (text.includes("API_IS_WORKING_FINE")) {
         showNotification("API is reachable!", "success");
-      } else if (text.includes("<!DOCTYPE html>")) {
-        showNotification("API Error: Received HTML. Proxy is NOT working.", "error");
-        console.error("[API ERROR] Received HTML. This means Apache is serving index.html instead of proxying to Node.js. Check if your Node.js app is running on port 3000 and if .htaccess is in the correct folder.");
       } else {
         showNotification(`API returned: ${text.slice(0, 30)}...`, "error");
       }
@@ -288,8 +196,6 @@ export default function App() {
             />
           )}
         </AnimatePresence>
-
-        <DebugInfo socket={socket} transportMode={transportMode} setTransportMode={setTransportMode} />
       </div>
     );
   }
@@ -297,9 +203,9 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-100">
       {view === "host" ? (
-        <HostView socket={socket} onExit={() => setView("landing")} showNotification={showNotification} />
+        <HostView hostId={hostId} onExit={() => setView("landing")} showNotification={showNotification} />
       ) : (
-        <PlayerView socket={socket} onExit={() => setView("landing")} showNotification={showNotification} />
+        <PlayerView playerId={playerId} onExit={() => setView("landing")} showNotification={showNotification} />
       )}
       
       <AnimatePresence>
@@ -311,22 +217,71 @@ export default function App() {
           />
         )}
       </AnimatePresence>
-
-      <DebugInfo socket={socket} transportMode={transportMode} setTransportMode={setTransportMode} />
     </div>
   );
 }
 
 // --- HOST VIEW ---
-function HostView({ socket, onExit, showNotification }: { 
-  socket: Socket | null, 
+function HostView({ hostId, onExit, showNotification }: { 
+  hostId: string, 
   onExit: () => void,
   showNotification: (m: string, t?: "error" | "info" | "success") => void 
 }) {
   const [game, setGame] = useState<GameState | null>(null);
-  const [answeredCount, setAnsweredCount] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
   const [topic, setTopic] = useState("");
+
+  const createGame = async (questions: Question[]) => {
+    try {
+      const res = await fetch("/api/v1/game/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ questions, hostId })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      
+      setGame({
+        pin: data.pin,
+        status: "lobby",
+        questionIndex: 0,
+        totalQuestions: questions.length,
+        players: []
+      });
+    } catch (err) {
+      showNotification("Failed to create game", "error");
+    }
+  };
+
+  const startGame = async () => {
+    if (!game) return;
+    try {
+      const res = await fetch("/api/v1/game/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: game.pin, hostId })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+    } catch (err) {
+      showNotification("Failed to start game", "error");
+    }
+  };
+
+  const nextQuestion = async () => {
+    if (!game) return;
+    try {
+      const res = await fetch("/api/v1/game/next", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: game.pin, hostId })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+    } catch (err) {
+      showNotification("Failed to move to next question", "error");
+    }
+  };
 
   const generateWithAI = async () => {
     if (!topic) return showNotification("Please enter a topic", "error");
@@ -342,7 +297,7 @@ function HostView({ socket, onExit, showNotification }: {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       
-      socket?.emit("host:create", data);
+      await createGame(data);
       showNotification(`Generated ${data.length} questions about ${topic}!`, "success");
     } catch (err) {
       showNotification(`AI Error: ${err instanceof Error ? err.message : String(err)}`, "error");
@@ -352,81 +307,37 @@ function HostView({ socket, onExit, showNotification }: {
   };
 
   useEffect(() => {
-    if (!socket) return;
+    createGame(DEFAULT_QUESTIONS);
+  }, []);
 
-    socket.emit("host:create", DEFAULT_QUESTIONS);
+  // Polling
+  useEffect(() => {
+    if (!game?.pin) return;
 
-    socket.on("host:game-created", ({ pin, questions }) => {
-      setGame({
-        pin,
-        status: "lobby",
-        questionIndex: 0,
-        totalQuestions: questions.length,
-        players: []
-      });
-      showNotification(`Game created! Pin: ${pin}`, "success");
-    });
-
-    socket.on("host:player-joined", (players: Player[]) => {
-      setGame(prev => prev ? { ...prev, players } : null);
-    });
-
-    socket.on("game:started", ({ question, index, total }) => {
-      setGame(prev => prev ? { 
-        ...prev, 
-        status: "playing", 
-        currentQuestion: question, 
-        questionIndex: index,
-        totalQuestions: total,
-        correctAnswer: undefined
-      } : null);
-      setAnsweredCount(0);
-      showNotification("The game has started!", "info");
-    });
-
-    socket.on("host:answer-received", ({ answeredCount }) => {
-      setAnsweredCount(answeredCount);
-    });
-
-    socket.on("game:show-results", ({ correctAnswer, players }) => {
-      setGame(prev => prev ? { ...prev, status: "results", correctAnswer, players } : null);
-    });
-
-    socket.on("game:next-question", ({ question, index }) => {
-      setGame(prev => prev ? { 
-        ...prev, 
-        status: "playing", 
-        currentQuestion: question, 
-        questionIndex: index,
-        correctAnswer: undefined
-      } : null);
-      setAnsweredCount(0);
-    });
-
-    socket.on("game:ended", (leaderboard) => {
-      setGame(prev => prev ? { ...prev, status: "ended", players: leaderboard } : null);
-      confetti({
-        particleCount: 150,
-        spread: 70,
-        origin: { y: 0.6 }
-      });
-      showNotification("Game completed! Check the podium.", "success");
-    });
-
-    socket.on("player:error", (msg) => {
-      showNotification(msg, "error");
-    });
-
-    return () => {
-      socket.off("host:game-created");
-      socket.off("host:player-joined");
-      socket.off("game:started");
-      socket.off("host:answer-received");
-      socket.off("game:show-results");
-      socket.off("game:next-question");
-      socket.off("game:ended");
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/v1/game/${game.pin}?hostId=${hostId}`);
+        if (!res.ok) throw new Error("Game not found");
+        const data = await res.json();
+        
+        setGame(prev => ({
+          ...prev!,
+          status: data.status,
+          currentQuestion: data.question,
+          questionIndex: data.currentQuestionIndex,
+          totalQuestions: data.totalQuestions,
+          players: data.players,
+          correctAnswer: data.correctAnswer,
+          leaderboard: data.leaderboard
+        }));
+      } catch (err) {
+        console.error("Polling error:", err);
+      }
     };
-  }, [socket]);
+
+    const interval = setInterval(poll, 2000);
+    return () => clearInterval(interval);
+  }, [game?.pin]);
 
   if (!game) return <LoadingScreen message="Initializing Game Server..." />;
 
@@ -499,7 +410,7 @@ function HostView({ socket, onExit, showNotification }: {
         <div className="flex justify-center">
           <button 
             disabled={game.players.length === 0}
-            onClick={() => socket?.emit("host:start-game", game.pin)}
+            onClick={startGame}
             className="px-16 py-6 bg-green-500 text-white rounded-3xl font-black text-3xl shadow-2xl hover:scale-105 transition-all disabled:opacity-50 disabled:scale-100 border-b-8 border-green-700 active:border-b-0 active:translate-y-2"
           >
             START GAME
@@ -510,6 +421,7 @@ function HostView({ socket, onExit, showNotification }: {
   }
 
   if (game.status === "playing" && game.currentQuestion) {
+    const answeredCount = game.players.filter(p => p.lastAnswer !== undefined).length;
     return (
       <div className="min-h-screen bg-indigo-900 flex flex-col p-8 text-white">
         <div className="flex justify-between items-center mb-8">
@@ -570,7 +482,7 @@ function HostView({ socket, onExit, showNotification }: {
 
         <div className="flex justify-center">
           <button 
-            onClick={() => socket?.emit("host:next-question", game.pin)}
+            onClick={nextQuestion}
             className="px-16 py-6 bg-white text-indigo-900 rounded-3xl font-black text-3xl shadow-2xl hover:scale-105 transition-all border-b-8 border-gray-300 flex items-center gap-4"
           >
             NEXT <ChevronRight size={32} />
@@ -581,24 +493,24 @@ function HostView({ socket, onExit, showNotification }: {
   }
 
   if (game.status === "ended") {
+    const leaderboard = (game as any).leaderboard || game.players.sort((a, b) => b.score - a.score);
     return (
       <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center justify-center">
         <Trophy size={128} className="text-yellow-400 mb-8 animate-bounce" />
         <h2 className="text-6xl font-black mb-12 tracking-tighter">FINAL PODIUM</h2>
         
         <div className="flex items-end gap-4 mb-16 h-64">
-          {game.players.slice(0, 3).map((p, i) => {
+          {[1, 0, 2].map((orderIdx, i) => {
             const heights = ["h-64", "h-48", "h-32"];
             const colors = ["bg-yellow-500", "bg-gray-400", "bg-orange-500"];
-            const order = [1, 0, 2]; // 2nd, 1st, 3rd
-            const player = game.players[order[i]];
-            if (!player) return null;
+            const player = leaderboard[orderIdx];
+            if (!player) return <div key={i} className="w-32" />;
 
             return (
               <div key={player.id} className="flex flex-col items-center gap-4">
                 <p className="font-black text-2xl">{player.name}</p>
-                <div className={`${colors[order[i]]} ${heights[order[i]]} w-32 rounded-t-3xl flex flex-col items-center justify-center shadow-2xl border-t-4 border-white/20`}>
-                  <span className="text-5xl font-black">{order[i] + 1}</span>
+                <div className={`${colors[orderIdx]} ${heights[orderIdx]} w-32 rounded-t-3xl flex flex-col items-center justify-center shadow-2xl border-t-4 border-white/20`}>
+                  <span className="text-5xl font-black">{orderIdx + 1}</span>
                   <span className="font-bold">{player.score}</span>
                 </div>
               </div>
@@ -620,8 +532,8 @@ function HostView({ socket, onExit, showNotification }: {
 }
 
 // --- PLAYER VIEW ---
-function PlayerView({ socket, onExit, showNotification }: { 
-  socket: Socket | null, 
+function PlayerView({ playerId, onExit, showNotification }: { 
+  playerId: string, 
   onExit: () => void,
   showNotification: (m: string, t?: "error" | "info" | "success") => void 
 }) {
@@ -633,69 +545,79 @@ function PlayerView({ socket, onExit, showNotification }: {
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
   const [score, setScore] = useState(0);
 
+  // Polling
   useEffect(() => {
-    if (!socket) return;
+    if (status === "join" || !pin) return;
 
-    socket.on("player:joined", () => {
-      setStatus("lobby");
-      showNotification("Successfully joined the game!", "success");
-    });
-
-    socket.on("player:error", (msg) => {
-      showNotification(msg, "error");
-    });
-
-    socket.on("game:started", ({ question }) => {
-      setCurrentQuestion(question);
-      setStatus("playing");
-      setHasAnswered(false);
-      setIsCorrect(null);
-    });
-
-    socket.on("game:next-question", ({ question }) => {
-      setCurrentQuestion(question);
-      setStatus("playing");
-      setHasAnswered(false);
-      setIsCorrect(null);
-    });
-
-    socket.on("game:show-results", ({ correctAnswer, players }) => {
-      const me = players.find((p: any) => p.id === socket.id);
-      if (me) {
-        setIsCorrect(me.isCorrect);
-        setScore(me.score);
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/v1/game/${pin}?playerId=${playerId}`);
+        if (!res.ok) {
+          showNotification("Game ended or not found", "error");
+          onExit();
+          return;
+        }
+        const data = await res.json();
+        
+        setStatus(data.status);
+        if (data.status === "playing") {
+          setCurrentQuestion(data.question);
+          setHasAnswered(data.hasAnswered);
+        } else if (data.status === "results") {
+          const me = data.playerResults.find((p: any) => p.id === playerId);
+          if (me) {
+            setIsCorrect(me.isCorrect);
+            setScore(me.score);
+          }
+        } else if (data.status === "ended") {
+          const me = data.leaderboard.find((p: any) => p.id === playerId);
+          if (me) setScore(me.score);
+        }
+      } catch (err) {
+        console.error("Polling error:", err);
       }
-      setStatus("results");
-    });
-
-    socket.on("game:ended", (leaderboard) => {
-      const me = leaderboard.find((p: any) => p.id === socket.id);
-      if (me) setScore(me.score);
-      setStatus("ended");
-    });
-
-    return () => {
-      socket.off("player:joined");
-      socket.off("player:error");
-      socket.off("game:started");
-      socket.off("game:next-question");
-      socket.off("game:show-results");
-      socket.off("game:ended");
     };
-  }, [socket]);
 
-  const handleJoin = (e: React.FormEvent) => {
+    const interval = setInterval(poll, 2000);
+    return () => clearInterval(interval);
+  }, [status, pin]);
+
+  const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (pin && name) {
-      socket?.emit("player:join", { pin, name });
+      try {
+        const res = await fetch("/api/v1/game/join", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pin, name, playerId })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        
+        setStatus("lobby");
+        showNotification("Successfully joined the game!", "success");
+      } catch (err) {
+        showNotification(err instanceof Error ? err.message : "Failed to join", "error");
+      }
     }
   };
 
-  const handleAnswer = (index: number) => {
+  const handleAnswer = async (index: number) => {
     if (!hasAnswered) {
       setHasAnswered(true);
-      socket?.emit("player:answer", { pin, answerIndex: index });
-      showNotification("Answer submitted!", "success");
+      try {
+        const res = await fetch("/api/v1/game/answer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pin, playerId, answerIndex: index })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        showNotification("Answer submitted!", "success");
+      } catch (err) {
+        setHasAnswered(false);
+        showNotification("Failed to submit answer", "error");
+      }
     }
   };
 

@@ -1,7 +1,6 @@
 import express from "express";
 import cors from "cors";
 import { createServer } from "http";
-import { Server } from "socket.io";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
@@ -34,20 +33,211 @@ app.set("trust proxy", true);
 
 app.use(express.json());
 app.use((req, res, next) => {
-  const logMsg = `[REQUEST] ${req.method} ${req.url} - Origin: ${req.headers.origin} - Host: ${req.headers.host} - Upgrade: ${req.headers.upgrade} - Transport: ${req.query.transport}`;
+  const logMsg = `[REQUEST] ${req.method} ${req.url} - Origin: ${req.headers.origin} - Host: ${req.headers.host}`;
   logToFile(logMsg);
   console.log(logMsg);
   next();
 });
 app.use(cors({
   origin: (origin, callback) => {
-    // Echo back origin or allow all for debugging
     callback(null, true);
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
 }));
+
+// Game State
+interface Player {
+  id: string;
+  name: string;
+  score: number;
+  lastAnswer?: number;
+  isCorrect?: boolean;
+  lastSeen: number;
+}
+
+interface Game {
+  pin: string;
+  hostId: string;
+  status: "lobby" | "playing" | "results" | "ended";
+  players: Record<string, Player>;
+  currentQuestionIndex: number;
+  questions: any[];
+  lastUpdated: number;
+}
+
+const games = new Map<string, Game>();
+
+// Helper to generate a random 6-digit PIN
+function generatePin() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+// Cleanup inactive games/players
+setInterval(() => {
+  const now = Date.now();
+  for (const [pin, game] of games.entries()) {
+    // If game hasn't been updated in 30 mins, delete it
+    if (now - game.lastUpdated > 30 * 60 * 1000) {
+      games.delete(pin);
+      continue;
+    }
+    // Remove players inactive for 1 minute
+    for (const playerId in game.players) {
+      if (now - game.players[playerId].lastSeen > 60 * 1000) {
+        delete game.players[playerId];
+      }
+    }
+  }
+}, 60000);
+
+// --- GAME API ENDPOINTS ---
+
+// Create Game
+app.post("/api/v1/game/create", (req, res) => {
+  const { questions, hostId } = req.body;
+  if (!questions || !hostId) return res.status(400).json({ error: "Missing questions or hostId" });
+
+  const pin = generatePin();
+  const game: Game = {
+    pin,
+    hostId,
+    status: "lobby",
+    players: {},
+    currentQuestionIndex: 0,
+    questions,
+    lastUpdated: Date.now()
+  };
+  games.set(pin, game);
+  res.json({ pin, questions });
+});
+
+// Join Game
+app.post("/api/v1/game/join", (req, res) => {
+  const { pin, name, playerId } = req.body;
+  const game = games.get(pin);
+
+  if (!game) return res.status(404).json({ error: "Game not found" });
+  if (game.status !== "lobby") return res.status(400).json({ error: "Game already started" });
+
+  game.players[playerId] = {
+    id: playerId,
+    name,
+    score: 0,
+    lastSeen: Date.now()
+  };
+  game.lastUpdated = Date.now();
+  res.json({ pin, name, playerId });
+});
+
+// Start Game
+app.post("/api/v1/game/start", (req, res) => {
+  const { pin, hostId } = req.body;
+  const game = games.get(pin);
+
+  if (!game) return res.status(404).json({ error: "Game not found" });
+  if (game.hostId !== hostId) return res.status(403).json({ error: "Unauthorized" });
+
+  game.status = "playing";
+  game.lastUpdated = Date.now();
+  res.json({ success: true });
+});
+
+// Submit Answer
+app.post("/api/v1/game/answer", (req, res) => {
+  const { pin, playerId, answerIndex } = req.body;
+  const game = games.get(pin);
+
+  if (!game || game.status !== "playing") return res.status(400).json({ error: "Invalid game state" });
+  
+  const player = game.players[playerId];
+  if (!player || player.lastAnswer !== undefined) return res.status(400).json({ error: "Already answered or not in game" });
+
+  const currentQuestion = game.questions[game.currentQuestionIndex];
+  const isCorrect = answerIndex === currentQuestion.correctAnswer;
+  
+  player.lastAnswer = answerIndex;
+  player.isCorrect = isCorrect;
+  player.lastSeen = Date.now();
+  if (isCorrect) {
+    player.score += 100;
+  }
+
+  game.lastUpdated = Date.now();
+
+  // Check if all players answered
+  const totalPlayers = Object.keys(game.players).length;
+  const answeredCount = Object.values(game.players).filter(p => p.lastAnswer !== undefined).length;
+
+  if (answeredCount === totalPlayers) {
+    game.status = "results";
+  }
+
+  res.json({ success: true });
+});
+
+// Next Question
+app.post("/api/v1/game/next", (req, res) => {
+  const { pin, hostId } = req.body;
+  const game = games.get(pin);
+
+  if (!game) return res.status(404).json({ error: "Game not found" });
+  if (game.hostId !== hostId) return res.status(403).json({ error: "Unauthorized" });
+
+  game.currentQuestionIndex++;
+  if (game.currentQuestionIndex < game.questions.length) {
+    game.status = "playing";
+    // Reset player answer states
+    Object.values(game.players).forEach(p => {
+      p.lastAnswer = undefined;
+      p.isCorrect = undefined;
+    });
+  } else {
+    game.status = "ended";
+  }
+  game.lastUpdated = Date.now();
+  res.json({ success: true });
+});
+
+// Get Game State (Polling)
+app.get("/api/v1/game/:pin", (req, res) => {
+  const { pin } = req.params;
+  const { playerId, hostId } = req.query;
+  const game = games.get(pin);
+
+  if (!game) return res.status(404).json({ error: "Game not found" });
+
+  // Update lastSeen for player
+  if (playerId && typeof playerId === "string" && game.players[playerId]) {
+    game.players[playerId].lastSeen = Date.now();
+  } else if (hostId && typeof hostId === "string" && game.hostId === hostId) {
+    game.lastUpdated = Date.now();
+  }
+
+  // Return state based on status
+  const state: any = {
+    status: game.status,
+    currentQuestionIndex: game.currentQuestionIndex,
+    totalQuestions: game.questions.length,
+    players: Object.values(game.players).map(p => ({ id: p.id, name: p.name, score: p.score }))
+  };
+
+  if (game.status === "playing") {
+    state.question = game.questions[game.currentQuestionIndex];
+    // For players, check if they already answered
+    if (playerId && typeof playerId === "string") {
+      state.hasAnswered = game.players[playerId]?.lastAnswer !== undefined;
+    }
+  } else if (game.status === "results") {
+    state.correctAnswer = game.questions[game.currentQuestionIndex].correctAnswer;
+    state.playerResults = Object.values(game.players);
+  } else if (game.status === "ended") {
+    state.leaderboard = Object.values(game.players).sort((a, b) => b.score - a.score);
+  }
+
+  res.json(state);
+});
 
 // AI Question Generation Route
 app.post("/api/v1/generate-questions", async (req, res) => {
@@ -88,176 +278,6 @@ app.post("/api/v1/generate-questions", async (req, res) => {
     logToFile(`[AI ERROR] ${error instanceof Error ? error.message : String(error)}`);
     res.status(500).json({ error: "Failed to generate questions with AI" });
   }
-});
-
-const io = new Server(httpServer, {
-  path: "/socket.io",
-  cors: {
-    origin: (origin, callback) => {
-      // Echo back origin or allow all for debugging
-      callback(null, true);
-    },
-    credentials: true,
-    methods: ["GET", "POST"],
-    allowedHeaders: ["content-type", "authorization", "x-requested-with"]
-  },
-  pingTimeout: 60000,
-  pingInterval: 25000,
-  transports: ["polling", "websocket"],
-  allowEIO3: true
-});
-
-// Engine.io logging
-io.engine.on("connection_error", (err) => {
-  const msg = `[SOCKET ERROR] Connection Error: ${err.code} - ${err.message} - ${err.context}`;
-  console.error(msg);
-  logToFile(msg);
-});
-
-// Game State
-interface Player {
-  id: string;
-  name: string;
-  score: number;
-  lastAnswer?: number;
-  isCorrect?: boolean;
-}
-
-interface Game {
-  pin: string;
-  hostId: string;
-  status: "lobby" | "playing" | "results" | "ended";
-  players: Map<string, Player>;
-  currentQuestionIndex: number;
-  questions: any[];
-}
-
-const games = new Map<string, Game>();
-
-// Helper to generate a random 6-digit PIN
-function generatePin() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
-
-io.on("connection", (socket) => {
-  console.log(`[SOCKET] Connected: ${socket.id}`);
-
-  // --- HOST EVENTS ---
-  socket.on("host:create", (questions: any[]) => {
-    const pin = generatePin();
-    const game: Game = {
-      pin,
-      hostId: socket.id,
-      status: "lobby",
-      players: new Map(),
-      currentQuestionIndex: 0,
-      questions
-    };
-    games.set(pin, game);
-    socket.join(pin);
-    socket.emit("host:game-created", { pin, questions });
-    console.log(`[GAME] Created: ${pin} by ${socket.id}`);
-  });
-
-  socket.on("host:start-game", (pin: string) => {
-    const game = games.get(pin);
-    if (game && game.hostId === socket.id) {
-      game.status = "playing";
-      io.to(pin).emit("game:started", { 
-        question: game.questions[game.currentQuestionIndex],
-        index: game.currentQuestionIndex,
-        total: game.questions.length
-      });
-    }
-  });
-
-  socket.on("host:next-question", (pin: string) => {
-    const game = games.get(pin);
-    if (game && game.hostId === socket.id) {
-      game.currentQuestionIndex++;
-      if (game.currentQuestionIndex < game.questions.length) {
-        // Reset player answer states for new question
-        game.players.forEach(p => {
-          p.lastAnswer = undefined;
-          p.isCorrect = undefined;
-        });
-        io.to(pin).emit("game:next-question", {
-          question: game.questions[game.currentQuestionIndex],
-          index: game.currentQuestionIndex
-        });
-      } else {
-        game.status = "ended";
-        const leaderboard = Array.from(game.players.values())
-          .sort((a, b) => b.score - a.score);
-        io.to(pin).emit("game:ended", leaderboard);
-      }
-    }
-  });
-
-  // --- PLAYER EVENTS ---
-  socket.on("player:join", ({ pin, name }: { pin: string; name: string }) => {
-    const game = games.get(pin);
-    if (!game) {
-      return socket.emit("player:error", "Game not found");
-    }
-    if (game.status !== "lobby") {
-      return socket.emit("player:error", "Game already started");
-    }
-
-    const player: Player = { id: socket.id, name, score: 0 };
-    game.players.set(socket.id, player);
-    socket.join(pin);
-    
-    socket.emit("player:joined", { pin, name });
-    io.to(game.hostId).emit("host:player-joined", Array.from(game.players.values()));
-    console.log(`[PLAYER] Joined: ${name} to ${pin}`);
-  });
-
-  socket.on("player:answer", ({ pin, answerIndex }: { pin: string; answerIndex: number }) => {
-    const game = games.get(pin);
-    if (!game || game.status !== "playing") return;
-
-    const player = game.players.get(socket.id);
-    if (!player || player.lastAnswer !== undefined) return;
-
-    const currentQuestion = game.questions[game.currentQuestionIndex];
-    const isCorrect = answerIndex === currentQuestion.correctAnswer;
-    
-    player.lastAnswer = answerIndex;
-    player.isCorrect = isCorrect;
-    if (isCorrect) {
-      player.score += 100; // Simple scoring
-    }
-
-    // Notify host that someone answered
-    const answeredCount = Array.from(game.players.values()).filter(p => p.lastAnswer !== undefined).length;
-    io.to(game.hostId).emit("host:answer-received", {
-      answeredCount,
-      totalPlayers: game.players.size
-    });
-
-    // If all players answered, show results automatically
-    if (answeredCount === game.players.size) {
-      io.to(pin).emit("game:show-results", {
-        correctAnswer: currentQuestion.correctAnswer,
-        players: Array.from(game.players.values())
-      });
-    }
-  });
-
-  socket.on("disconnect", () => {
-    console.log(`[SOCKET] Disconnected: ${socket.id}`);
-    // Cleanup games if host leaves
-    for (const [pin, game] of games.entries()) {
-      if (game.hostId === socket.id) {
-        io.to(pin).emit("player:error", "Host disconnected");
-        games.delete(pin);
-      } else if (game.players.has(socket.id)) {
-        game.players.delete(socket.id);
-        io.to(game.hostId).emit("host:player-joined", Array.from(game.players.values()));
-      }
-    }
-  });
 });
 
 // API Routes

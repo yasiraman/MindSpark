@@ -15,6 +15,7 @@
     "@google/genai": "^1.48.0",
     "@tailwindcss/vite": "^4.1.14",
     "@types/canvas-confetti": "^1.9.0",
+    "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^5.0.4",
     "canvas-confetti": "^1.9.4",
     "cors": "^2.8.6",
@@ -29,6 +30,7 @@
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
     "tsx": "^4.21.0",
+    "uuid": "^13.0.0",
     "vite": "^6.2.0"
   },
   "devDependencies": {
