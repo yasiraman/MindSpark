@@ -1,5 +1,5 @@
 // MindSpark v3.0 - Firebase Online Version
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, Component, ErrorInfo, ReactNode } from "react";
 import { 
   Trophy, 
   Users, 
@@ -193,8 +193,70 @@ function LoadingScreen({ message }: { message: string }) {
   );
 }
 
+// --- ERROR BOUNDARY ---
+interface ErrorBoundaryProps {
+  children: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  public state: ErrorBoundaryState;
+  public props: ErrorBoundaryProps;
+
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+    this.props = props;
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("ErrorBoundary caught an error", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-red-900 flex flex-col items-center justify-center p-6 text-white text-center">
+          <AlertCircle size={64} className="mb-6" />
+          <h1 className="text-4xl font-black mb-4">Ouch! Something went wrong.</h1>
+          <p className="text-xl opacity-80 mb-8 max-w-md">
+            MindSpark encountered an unexpected error. Please try refreshing the page.
+          </p>
+          <div className="bg-black/20 p-4 rounded-xl text-left font-mono text-xs overflow-auto max-w-full mb-8">
+            {this.state.error?.toString()}
+          </div>
+          <button 
+            onClick={() => window.location.reload()}
+            className="px-8 py-4 bg-white text-red-900 rounded-2xl font-black shadow-xl hover:scale-105 transition-all"
+          >
+            REFRESH PAGE
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 // --- MAIN APP ---
 export default function App() {
+  return (
+    <ErrorBoundary>
+      <MainApp />
+    </ErrorBoundary>
+  );
+}
+
+function MainApp() {
   const [user, setUser] = useState<any>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [view, setView] = useState<"landing" | "host" | "player">("landing");
@@ -348,6 +410,15 @@ function HostView({ user, onExit, showNotification }: {
   const [players, setPlayers] = useState<Player[]>([]);
   const [isCreating, setIsCreating] = useState(true);
   const [customQuestions, setCustomQuestions] = useState<Question[]>(DEFAULT_QUESTIONS);
+
+  const answeredCount = players.filter(p => p.lastAnswer !== null && p.lastAnswer !== undefined).length;
+
+  // Auto-move to results if everyone answered
+  useEffect(() => {
+    if (game && players.length > 0 && answeredCount === players.length && game.status === "playing") {
+      updateDoc(doc(db, "games", game.pin), { status: "results" });
+    }
+  }, [answeredCount, players.length, game?.status, game?.pin]);
 
   const createGame = async (questions: Question[]) => {
     const pin = Math.floor(100000 + Math.random() * 900000).toString();
@@ -604,15 +675,6 @@ function HostView({ user, onExit, showNotification }: {
   }
 
   if (game.status === "playing" && game.currentQuestion) {
-    const answeredCount = players.filter(p => p.lastAnswer !== null && p.lastAnswer !== undefined).length;
-    
-    // Auto-move to results if everyone answered
-    useEffect(() => {
-      if (players.length > 0 && answeredCount === players.length && game.status === "playing") {
-        updateDoc(doc(db, "games", game.pin), { status: "results" });
-      }
-    }, [answeredCount, players.length, game.status]);
-
     return (
       <div className="min-h-screen bg-indigo-900 flex flex-col p-8 text-white">
         <div className="flex justify-between items-center mb-8">
@@ -656,7 +718,7 @@ function HostView({ user, onExit, showNotification }: {
         
         <div className="flex-1 max-w-2xl mx-auto w-full overflow-y-auto mb-8 bg-black/20 rounded-3xl p-8 backdrop-blur-md">
           <div className="space-y-4">
-            {players.sort((a, b) => b.score - a.score).map((p, i) => (
+            {[...players].sort((a, b) => b.score - a.score).map((p, i) => (
               <div key={p.id} className="flex justify-between items-center bg-white/10 p-5 rounded-2xl border border-white/5">
                 <div className="flex items-center gap-4">
                   <span className="text-2xl font-black text-indigo-300">#{i + 1}</span>
