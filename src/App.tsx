@@ -373,16 +373,21 @@ function HostView({ hostId, onExit, showNotification }: {
 
   useEffect(() => {
     createGame(DEFAULT_QUESTIONS);
-    
+  }, []);
+
+  useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       const { type, pin, state } = event.data;
       if (type === "STATE_UPDATE" && game?.pin === pin) {
-        setGame(prev => ({
-          ...prev!,
-          ...state,
-          currentQuestion: state.question,
-          questionIndex: state.currentQuestionIndex
-        }));
+        setGame(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            ...state,
+            currentQuestion: state.question,
+            questionIndex: state.currentQuestionIndex
+          };
+        });
       }
     };
 
@@ -574,6 +579,8 @@ function PlayerView({ playerId, onExit, showNotification }: {
   const [score, setScore] = useState(0);
 
   useEffect(() => {
+    if (!pin) return;
+
     const handleMessage = (event: MessageEvent) => {
       const { type, pin: msgPin, state } = event.data;
       if (type === "STATE_UPDATE" && pin === msgPin) {
