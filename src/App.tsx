@@ -1013,6 +1013,7 @@ function PlayerView({ user, onExit, showNotification }: {
   }
 
   if (game.status === "playing") {
+    const currentQ = game.questions[game.currentQuestionIndex];
     return (
       <div className="min-h-screen bg-gray-100 flex flex-col">
         <div className="bg-white p-4 shadow-md flex justify-between items-center">
@@ -1029,17 +1030,25 @@ function PlayerView({ user, onExit, showNotification }: {
 
         <div className="flex-1 p-4 flex flex-col gap-4">
           {!hasAnswered ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 h-full">
-              {game.questions[game.currentQuestionIndex]?.options.map((_, i) => (
-                <button 
-                  key={i}
-                  onClick={() => handleAnswer(i)}
-                  className={`${COLORS[i]} h-full rounded-3xl shadow-xl active:scale-95 transition-all flex items-center justify-center text-white text-6xl font-black border-b-8 border-black/20`}
-                >
-                  {SHAPES[i]}
-                </button>
-              ))}
-            </div>
+            <>
+              <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-200 mb-2">
+                <h2 className="text-2xl font-black text-indigo-900 leading-tight">
+                  {currentQ?.text}
+                </h2>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
+                {currentQ?.options.map((opt, i) => (
+                  <button 
+                    key={i}
+                    onClick={() => handleAnswer(i)}
+                    className={`${COLORS[i]} p-6 rounded-3xl shadow-xl active:scale-95 transition-all flex items-center gap-4 text-white border-b-8 border-black/20 text-left`}
+                  >
+                    <span className="text-4xl font-black opacity-40 shrink-0">{SHAPES[i]}</span>
+                    <span className="text-xl font-bold leading-tight">{opt}</span>
+                  </button>
+                ))}
+              </div>
+            </>
           ) : (
             <div className="h-full flex flex-col items-center justify-center text-center">
               <div className="bg-indigo-600 p-8 rounded-full mb-6 animate-bounce">
