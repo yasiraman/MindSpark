@@ -120,50 +120,45 @@ const broadcastState = (pin: string) => {
   });
 };
 
-// Listen for requests (Only one tab should act as the "Server", usually the Host)
+// Listen for requests (The Host tab acts as the "Server")
 channel.onmessage = (event) => {
-  const { type, payload } = event.data;
+  const { type, payload, pin: msgPin, state: msgState } = event.data;
   
+  // If it's a state update, all tabs (Host and Players) update their local view
+  if (type === "STATE_UPDATE") {
+    const event = new CustomEvent("mindspark_state_sync", { detail: { pin: msgPin, state: msgState } });
+    window.dispatchEvent(event);
+    return;
+  }
+
+  // Only the tab that "owns" the game (the Host) should process logic
+  // We check if the game exists in our local memory
+  const game = localGames[payload?.pin || msgPin];
+  if (!game) return;
+
   switch (type) {
-    case "CREATE_GAME": {
-      const { pin, questions, hostId } = payload;
-      localGames[pin] = {
-        pin,
-        hostId,
-        questions,
-        players: [],
-        status: "lobby",
-        currentQuestionIndex: 0,
-        createdAt: Date.now()
-      };
-      broadcastState(pin);
-      break;
-    }
     case "JOIN_GAME": {
-      const { pin, name, playerId } = payload;
-      const game = localGames[pin];
-      if (game && game.status === "lobby") {
+      const { name, playerId } = payload;
+      if (game.status === "lobby") {
         if (!game.players.find((p: any) => p.id === playerId)) {
           game.players.push({ id: playerId, name, score: 0 });
+          broadcastState(game.pin);
         }
-        broadcastState(pin);
       }
       break;
     }
     case "START_GAME": {
-      const { pin, hostId } = payload;
-      const game = localGames[pin];
-      if (game && game.hostId === hostId) {
+      const { hostId } = payload;
+      if (game.hostId === hostId) {
         game.status = "playing";
         game.currentQuestionIndex = 0;
-        broadcastState(pin);
+        broadcastState(game.pin);
       }
       break;
     }
     case "SUBMIT_ANSWER": {
-      const { pin, playerId, answerIndex } = payload;
-      const game = localGames[pin];
-      if (game && game.status === "playing") {
+      const { playerId, answerIndex } = payload;
+      if (game.status === "playing") {
         const player = game.players.find((p: any) => p.id === playerId);
         const question = game.questions[game.currentQuestionIndex];
         
@@ -172,19 +167,17 @@ channel.onmessage = (event) => {
           player.isCorrect = answerIndex === question.correctAnswer;
           if (player.isCorrect) player.score += 100;
           
-          // If all players answered, move to results
           if (game.players.every((p: any) => p.lastAnswer !== undefined)) {
             game.status = "results";
           }
-          broadcastState(pin);
+          broadcastState(game.pin);
         }
       }
       break;
     }
     case "NEXT_QUESTION": {
-      const { pin, hostId } = payload;
-      const game = localGames[pin];
-      if (game && game.hostId === hostId) {
+      const { hostId } = payload;
+      if (game.hostId === hostId) {
         if (game.currentQuestionIndex < game.questions.length - 1) {
           game.currentQuestionIndex++;
           game.status = "playing";
@@ -195,13 +188,12 @@ channel.onmessage = (event) => {
         } else {
           game.status = "ended";
         }
-        broadcastState(pin);
+        broadcastState(game.pin);
       }
       break;
     }
     case "REQUEST_STATE": {
-      const { pin } = payload;
-      broadcastState(pin);
+      broadcastState(game.pin);
       break;
     }
   }
@@ -376,9 +368,9 @@ function HostView({ hostId, onExit, showNotification }: {
   }, []);
 
   useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      const { type, pin, state } = event.data;
-      if (type === "STATE_UPDATE" && game?.pin === pin) {
+    const handleSync = (e: any) => {
+      const { pin, state } = e.detail;
+      if (game?.pin === pin) {
         setGame(prev => {
           if (!prev) return null;
           return {
@@ -391,8 +383,8 @@ function HostView({ hostId, onExit, showNotification }: {
       }
     };
 
-    channel.addEventListener("message", handleMessage);
-    return () => channel.removeEventListener("message", handleMessage);
+    window.addEventListener("mindspark_state_sync", handleSync);
+    return () => window.removeEventListener("mindspark_state_sync", handleSync);
   }, [game?.pin]);
 
   if (!game) return <LoadingScreen message="Initializing Local Game..." />;
@@ -581,13 +573,12 @@ function PlayerView({ playerId, onExit, showNotification }: {
   useEffect(() => {
     if (!pin) return;
 
-    const handleMessage = (event: MessageEvent) => {
-      const { type, pin: msgPin, state } = event.data;
-      if (type === "STATE_UPDATE" && pin === msgPin) {
+    const handleSync = (e: any) => {
+      const { pin: msgPin, state } = e.detail;
+      if (pin === msgPin) {
         setStatus(state.status);
         if (state.status === "playing") {
           setCurrentQuestion(state.question);
-          // Check if we already answered this question
           const me = state.players.find((p: any) => p.id === playerId);
           setHasAnswered(me?.lastAnswer !== undefined);
         } else if (state.status === "results") {
@@ -603,8 +594,8 @@ function PlayerView({ playerId, onExit, showNotification }: {
       }
     };
 
-    channel.addEventListener("message", handleMessage);
-    return () => channel.removeEventListener("message", handleMessage);
+    window.addEventListener("mindspark_state_sync", handleSync);
+    return () => window.removeEventListener("mindspark_state_sync", handleSync);
   }, [pin, playerId]);
 
   const handleJoin = (e: React.FormEvent) => {
