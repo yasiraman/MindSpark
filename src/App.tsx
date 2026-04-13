@@ -1,4 +1,4 @@
-// MindSpark v2.0 - REST API Version
+// MindSpark v2.0 - Local Version (No API Connections)
 import React, { useState, useEffect, useRef } from "react";
 import { 
   Trophy, 
@@ -46,6 +46,7 @@ interface GameState {
   totalQuestions: number;
   players: Player[];
   correctAnswer?: number;
+  leaderboard?: Player[];
 }
 
 // --- CONSTANTS ---
@@ -67,6 +68,18 @@ const DEFAULT_QUESTIONS: Question[] = [
     options: ["3", "4", "5", "6"],
     correctAnswer: 1,
     timeLimit: 10
+  },
+  {
+    text: "Who painted the Mona Lisa?",
+    options: ["Van Gogh", "Picasso", "Da Vinci", "Monet"],
+    correctAnswer: 2,
+    timeLimit: 20
+  },
+  {
+    text: "What is the largest ocean on Earth?",
+    options: ["Atlantic", "Indian", "Arctic", "Pacific"],
+    correctAnswer: 3,
+    timeLimit: 20
   }
 ];
 
@@ -78,6 +91,121 @@ const COLORS = [
 ];
 
 const SHAPES = ["▲", "◆", "●", "■"];
+
+// --- LOCAL SERVER SIMULATION (BroadcastChannel) ---
+// This allows multiple tabs to communicate without a real backend.
+const CHANNEL_NAME = "mindspark_local_sync";
+const channel = new BroadcastChannel(CHANNEL_NAME);
+
+// Global state for the "Server" tab
+let localGames: Record<string, any> = {};
+
+// Helper to broadcast state
+const broadcastState = (pin: string) => {
+  const game = localGames[pin];
+  if (!game) return;
+  
+  channel.postMessage({
+    type: "STATE_UPDATE",
+    pin,
+    state: {
+      status: game.status,
+      question: game.status === "playing" ? game.questions[game.currentQuestionIndex] : null,
+      currentQuestionIndex: game.currentQuestionIndex,
+      totalQuestions: game.questions.length,
+      players: game.players,
+      correctAnswer: game.status === "results" ? game.questions[game.currentQuestionIndex].correctAnswer : null,
+      leaderboard: game.status === "ended" ? [...game.players].sort((a, b) => b.score - a.score) : null
+    }
+  });
+};
+
+// Listen for requests (Only one tab should act as the "Server", usually the Host)
+channel.onmessage = (event) => {
+  const { type, payload } = event.data;
+  
+  switch (type) {
+    case "CREATE_GAME": {
+      const { pin, questions, hostId } = payload;
+      localGames[pin] = {
+        pin,
+        hostId,
+        questions,
+        players: [],
+        status: "lobby",
+        currentQuestionIndex: 0,
+        createdAt: Date.now()
+      };
+      broadcastState(pin);
+      break;
+    }
+    case "JOIN_GAME": {
+      const { pin, name, playerId } = payload;
+      const game = localGames[pin];
+      if (game && game.status === "lobby") {
+        if (!game.players.find((p: any) => p.id === playerId)) {
+          game.players.push({ id: playerId, name, score: 0 });
+        }
+        broadcastState(pin);
+      }
+      break;
+    }
+    case "START_GAME": {
+      const { pin, hostId } = payload;
+      const game = localGames[pin];
+      if (game && game.hostId === hostId) {
+        game.status = "playing";
+        game.currentQuestionIndex = 0;
+        broadcastState(pin);
+      }
+      break;
+    }
+    case "SUBMIT_ANSWER": {
+      const { pin, playerId, answerIndex } = payload;
+      const game = localGames[pin];
+      if (game && game.status === "playing") {
+        const player = game.players.find((p: any) => p.id === playerId);
+        const question = game.questions[game.currentQuestionIndex];
+        
+        if (player && player.lastAnswer === undefined) {
+          player.lastAnswer = answerIndex;
+          player.isCorrect = answerIndex === question.correctAnswer;
+          if (player.isCorrect) player.score += 100;
+          
+          // If all players answered, move to results
+          if (game.players.every((p: any) => p.lastAnswer !== undefined)) {
+            game.status = "results";
+          }
+          broadcastState(pin);
+        }
+      }
+      break;
+    }
+    case "NEXT_QUESTION": {
+      const { pin, hostId } = payload;
+      const game = localGames[pin];
+      if (game && game.hostId === hostId) {
+        if (game.currentQuestionIndex < game.questions.length - 1) {
+          game.currentQuestionIndex++;
+          game.status = "playing";
+          game.players.forEach((p: any) => {
+            delete p.lastAnswer;
+            delete p.isCorrect;
+          });
+        } else {
+          game.status = "ended";
+        }
+        broadcastState(pin);
+      }
+      break;
+    }
+    case "REQUEST_STATE": {
+      const { pin } = payload;
+      broadcastState(pin);
+      break;
+    }
+  }
+};
 
 // --- COMPONENTS ---
 
@@ -123,22 +251,6 @@ export default function App() {
     setTimeout(() => setNotification(null), 5000);
   };
 
-  const testApi = async () => {
-    try {
-      showNotification("Testing API connectivity...", "info");
-      const res = await fetch("/api/v1/test-text");
-      const text = await res.text();
-      
-      if (text.includes("API_IS_WORKING_FINE")) {
-        showNotification("API is reachable!", "success");
-      } else {
-        showNotification(`API returned: ${text.slice(0, 30)}...`, "error");
-      }
-    } catch (err) {
-      showNotification(`API Unreachable: ${err instanceof Error ? err.message : String(err)}`, "error");
-    }
-  };
-
   if (view === "landing") {
     return (
       <div className="min-h-screen bg-indigo-900 flex flex-col items-center justify-center p-6 text-white overflow-hidden relative">
@@ -180,12 +292,9 @@ export default function App() {
             </button>
           </div>
           
-          <button 
-            onClick={testApi}
-            className="mt-8 text-indigo-300 font-bold text-sm hover:text-white transition-all flex items-center gap-2 mx-auto"
-          >
-            <RefreshCw size={14} /> TEST API CONNECTIVITY
-          </button>
+          <p className="mt-8 text-indigo-300 font-bold text-sm opacity-50">
+            LOCAL VERSION - NO SERVER REQUIRED
+          </p>
         </motion.div>
         
         <AnimatePresence>
@@ -229,118 +338,59 @@ function HostView({ hostId, onExit, showNotification }: {
   showNotification: (m: string, t?: "error" | "info" | "success") => void 
 }) {
   const [game, setGame] = useState<GameState | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [topic, setTopic] = useState("");
 
-  const createGame = async (questions: Question[]) => {
-    try {
-      const res = await fetch("/api/v1/game/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ questions, hostId })
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      
-      setGame({
-        pin: data.pin,
-        status: "lobby",
-        questionIndex: 0,
-        totalQuestions: questions.length,
-        players: []
-      });
-    } catch (err) {
-      showNotification("Failed to create game", "error");
-    }
-  };
-
-  const startGame = async () => {
-    if (!game) return;
-    try {
-      const res = await fetch("/api/v1/game/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pin: game.pin, hostId })
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-    } catch (err) {
-      showNotification("Failed to start game", "error");
-    }
-  };
-
-  const nextQuestion = async () => {
-    if (!game) return;
-    try {
-      const res = await fetch("/api/v1/game/next", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pin: game.pin, hostId })
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-    } catch (err) {
-      showNotification("Failed to move to next question", "error");
-    }
-  };
-
-  const generateWithAI = async () => {
-    if (!topic) return showNotification("Please enter a topic", "error");
+  const createGame = (questions: Question[]) => {
+    const pin = Math.floor(100000 + Math.random() * 900000).toString();
+    channel.postMessage({
+      type: "CREATE_GAME",
+      payload: { pin, questions, hostId }
+    });
     
-    setIsGenerating(true);
-    try {
-      const res = await fetch("/api/v1/generate-questions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic })
-      });
-      
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      
-      await createGame(data);
-      showNotification(`Generated ${data.length} questions about ${topic}!`, "success");
-    } catch (err) {
-      showNotification(`AI Error: ${err instanceof Error ? err.message : String(err)}`, "error");
-    } finally {
-      setIsGenerating(false);
-    }
+    setGame({
+      pin,
+      status: "lobby",
+      questionIndex: 0,
+      totalQuestions: questions.length,
+      players: []
+    });
+  };
+
+  const startGame = () => {
+    if (!game) return;
+    channel.postMessage({
+      type: "START_GAME",
+      payload: { pin: game.pin, hostId }
+    });
+  };
+
+  const nextQuestion = () => {
+    if (!game) return;
+    channel.postMessage({
+      type: "NEXT_QUESTION",
+      payload: { pin: game.pin, hostId }
+    });
   };
 
   useEffect(() => {
     createGame(DEFAULT_QUESTIONS);
-  }, []);
-
-  // Polling
-  useEffect(() => {
-    if (!game?.pin) return;
-
-    const poll = async () => {
-      try {
-        const res = await fetch(`/api/v1/game/${game.pin}?hostId=${hostId}`);
-        if (!res.ok) throw new Error("Game not found");
-        const data = await res.json();
-        
+    
+    const handleMessage = (event: MessageEvent) => {
+      const { type, pin, state } = event.data;
+      if (type === "STATE_UPDATE" && game?.pin === pin) {
         setGame(prev => ({
           ...prev!,
-          status: data.status,
-          currentQuestion: data.question,
-          questionIndex: data.currentQuestionIndex,
-          totalQuestions: data.totalQuestions,
-          players: data.players,
-          correctAnswer: data.correctAnswer,
-          leaderboard: data.leaderboard
+          ...state,
+          currentQuestion: state.question,
+          questionIndex: state.currentQuestionIndex
         }));
-      } catch (err) {
-        console.error("Polling error:", err);
       }
     };
 
-    const interval = setInterval(poll, 2000);
-    return () => clearInterval(interval);
+    channel.addEventListener("message", handleMessage);
+    return () => channel.removeEventListener("message", handleMessage);
   }, [game?.pin]);
 
-  if (!game) return <LoadingScreen message="Initializing Game Server..." />;
+  if (!game) return <LoadingScreen message="Initializing Local Game..." />;
 
   if (game.status === "lobby") {
     return (
@@ -350,7 +400,7 @@ function HostView({ hostId, onExit, showNotification }: {
             <LogOut size={24} />
           </button>
           <div className="text-center">
-            <p className="text-indigo-200 font-bold uppercase tracking-widest text-sm mb-1">Join at spark.solitrax.net</p>
+            <p className="text-indigo-200 font-bold uppercase tracking-widest text-sm mb-1">Join in another tab</p>
             <div className="bg-white text-indigo-900 px-10 py-4 rounded-3xl shadow-2xl inline-block">
               <h2 className="text-6xl font-black tracking-tighter">{game.pin}</h2>
             </div>
@@ -362,29 +412,6 @@ function HostView({ hostId, onExit, showNotification }: {
         </div>
 
         <div className="flex-1 overflow-y-auto mb-8">
-          <div className="max-w-xl mx-auto mb-12 bg-white/10 p-6 rounded-3xl backdrop-blur-md border border-white/10">
-            <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <RefreshCw size={20} className={isGenerating ? "animate-spin" : ""} />
-              GENERATE CUSTOM QUIZ WITH AI
-            </h3>
-            <div className="flex gap-3">
-              <input 
-                type="text" 
-                value={topic}
-                onChange={(e) => setTopic(e.target.value)}
-                placeholder="Enter topic (e.g. Space, History, Anime...)"
-                className="flex-1 bg-white/10 border border-white/20 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-white/50 placeholder:text-white/30"
-              />
-              <button 
-                onClick={generateWithAI}
-                disabled={isGenerating}
-                className="bg-white text-indigo-900 px-6 py-3 rounded-xl font-black hover:scale-105 transition-all disabled:opacity-50"
-              >
-                {isGenerating ? "GENERATING..." : "GENERATE"}
-              </button>
-            </div>
-          </div>
-
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
             <AnimatePresence>
               {game.players.map((p) => (
@@ -494,7 +521,7 @@ function HostView({ hostId, onExit, showNotification }: {
   }
 
   if (game.status === "ended") {
-    const leaderboard = (game as any).leaderboard || game.players.sort((a, b) => b.score - a.score);
+    const leaderboard = game.leaderboard || [...game.players].sort((a, b) => b.score - a.score);
     return (
       <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center justify-center">
         <Trophy size={128} className="text-yellow-400 mb-8 animate-bounce" />
@@ -546,79 +573,57 @@ function PlayerView({ playerId, onExit, showNotification }: {
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
   const [score, setScore] = useState(0);
 
-  // Polling
   useEffect(() => {
-    if (status === "join" || !pin) return;
-
-    const poll = async () => {
-      try {
-        const res = await fetch(`/api/v1/game/${pin}?playerId=${playerId}`);
-        if (!res.ok) {
-          showNotification("Game ended or not found", "error");
-          onExit();
-          return;
-        }
-        const data = await res.json();
-        
-        setStatus(data.status);
-        if (data.status === "playing") {
-          setCurrentQuestion(data.question);
-          setHasAnswered(data.hasAnswered);
-        } else if (data.status === "results") {
-          const me = data.playerResults.find((p: any) => p.id === playerId);
+    const handleMessage = (event: MessageEvent) => {
+      const { type, pin: msgPin, state } = event.data;
+      if (type === "STATE_UPDATE" && pin === msgPin) {
+        setStatus(state.status);
+        if (state.status === "playing") {
+          setCurrentQuestion(state.question);
+          // Check if we already answered this question
+          const me = state.players.find((p: any) => p.id === playerId);
+          setHasAnswered(me?.lastAnswer !== undefined);
+        } else if (state.status === "results") {
+          const me = state.players.find((p: any) => p.id === playerId);
           if (me) {
             setIsCorrect(me.isCorrect);
             setScore(me.score);
           }
-        } else if (data.status === "ended") {
-          const me = data.leaderboard.find((p: any) => p.id === playerId);
+        } else if (state.status === "ended") {
+          const me = state.players.find((p: any) => p.id === playerId);
           if (me) setScore(me.score);
         }
-      } catch (err) {
-        console.error("Polling error:", err);
       }
     };
 
-    const interval = setInterval(poll, 2000);
-    return () => clearInterval(interval);
-  }, [status, pin]);
+    channel.addEventListener("message", handleMessage);
+    return () => channel.removeEventListener("message", handleMessage);
+  }, [pin, playerId]);
 
-  const handleJoin = async (e: React.FormEvent) => {
+  const handleJoin = (e: React.FormEvent) => {
     e.preventDefault();
     if (pin && name) {
-      try {
-        const res = await fetch("/api/v1/game/join", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pin, name, playerId })
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-        
-        setStatus("lobby");
-        showNotification("Successfully joined the game!", "success");
-      } catch (err) {
-        showNotification(err instanceof Error ? err.message : "Failed to join", "error");
-      }
+      channel.postMessage({
+        type: "JOIN_GAME",
+        payload: { pin, name, playerId }
+      });
+      channel.postMessage({
+        type: "REQUEST_STATE",
+        payload: { pin }
+      });
+      setStatus("lobby");
+      showNotification("Successfully joined the game!", "success");
     }
   };
 
-  const handleAnswer = async (index: number) => {
+  const handleAnswer = (index: number) => {
     if (!hasAnswered) {
       setHasAnswered(true);
-      try {
-        const res = await fetch("/api/v1/game/answer", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pin, playerId, answerIndex: index })
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-        showNotification("Answer submitted!", "success");
-      } catch (err) {
-        setHasAnswered(false);
-        showNotification("Failed to submit answer", "error");
-      }
+      channel.postMessage({
+        type: "SUBMIT_ANSWER",
+        payload: { pin, playerId, answerIndex: index }
+      });
+      showNotification("Answer submitted!", "success");
     }
   };
 
