@@ -21,7 +21,9 @@ import {
   where,
   orderBy,
   limit,
-  deleteDoc
+  deleteDoc,
+  deleteField,
+  writeBatch
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -63,5 +65,7 @@ export {
   where,
   orderBy,
   limit,
-  deleteDoc
+  deleteDoc,
+  deleteField,
+  writeBatch
 };

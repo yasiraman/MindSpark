@@ -43,7 +43,9 @@ import {
   where,
   orderBy,
   limit,
-  deleteDoc
+  deleteDoc,
+  deleteField,
+  writeBatch
 } from "./firebase";
 import { serverTimestamp, Timestamp } from "firebase/firestore";
 
@@ -460,22 +462,27 @@ function HostView({ user, onExit, showNotification }: {
     if (!game) return;
     const isLast = game.questionIndex >= game.totalQuestions - 1;
     try {
+      const batch = writeBatch(db);
+      
       if (isLast) {
-        await updateDoc(doc(db, "games", game.pin), { status: "ended" });
+        batch.update(doc(db, "games", game.pin), { status: "ended" });
       } else {
-        // Reset players' answers for next question
-        const batchUpdates = players.map(p => 
-          updateDoc(doc(db, "games", game.pin, "players", p.id), {
-            lastAnswer: null,
-            isCorrect: null
-          })
-        );
-        await Promise.all(batchUpdates);
-        await updateDoc(doc(db, "games", game.pin), { 
+        // Reset players' answers for next question using deleteField
+        // and update game state in the same atomic batch
+        players.forEach(p => {
+          batch.update(doc(db, "games", game.pin, "players", p.id), {
+            lastAnswer: deleteField(),
+            isCorrect: deleteField()
+          });
+        });
+
+        batch.update(doc(db, "games", game.pin), { 
           status: "playing",
           currentQuestionIndex: game.questionIndex + 1
         });
       }
+      
+      await batch.commit();
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `games/${game.pin}`);
     }
