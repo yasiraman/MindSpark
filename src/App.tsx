@@ -265,6 +265,16 @@ function MainApp() {
   const [notification, setNotification] = useState<{ message: string; type: "error" | "info" | "success" } | null>(null);
 
   useEffect(() => {
+    if (isAuthReady) {
+      const savedPin = localStorage.getItem("mindspark_active_pin");
+      const savedRole = localStorage.getItem("mindspark_user_role");
+      if (savedPin && (savedRole === "host" || savedRole === "player")) {
+        setView(savedRole as "host" | "player");
+      }
+    }
+  }, [isAuthReady]);
+
+  useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setIsAuthReady(true);
@@ -289,6 +299,9 @@ function MainApp() {
   const handleLogout = async () => {
     try {
       await signOut(auth);
+      localStorage.removeItem("mindspark_active_pin");
+      localStorage.removeItem("mindspark_user_role");
+      localStorage.removeItem("mindspark_player_name");
       setView("landing");
       showNotification("Logged out", "info");
     } catch (err) {
@@ -413,6 +426,12 @@ function HostView({ user, onExit, showNotification }: {
   const [isCreating, setIsCreating] = useState(true);
   const [customQuestions, setCustomQuestions] = useState<Question[]>(DEFAULT_QUESTIONS);
 
+  const handleExit = () => {
+    localStorage.removeItem("mindspark_active_pin");
+    localStorage.removeItem("mindspark_user_role");
+    onExit();
+  };
+
   const answeredCount = players.filter(p => p.lastAnswer !== null && p.lastAnswer !== undefined).length;
 
   // Auto-move to results if everyone answered
@@ -438,6 +457,8 @@ function HostView({ user, onExit, showNotification }: {
 
     try {
       await setDoc(gameRef, newGame);
+      localStorage.setItem("mindspark_active_pin", pin);
+      localStorage.setItem("mindspark_user_role", "host");
       setGame({
         ...newGame,
         createdAt: new Date() as any,
@@ -489,7 +510,33 @@ function HostView({ user, onExit, showNotification }: {
   };
 
   useEffect(() => {
-    // We no longer auto-create on mount, we wait for the host to finish creating
+    // Check for existing session
+    const savedPin = localStorage.getItem("mindspark_active_pin");
+    const savedRole = localStorage.getItem("mindspark_user_role");
+    
+    if (savedPin && savedRole === "host") {
+      getDoc(doc(db, "games", savedPin)).then(snap => {
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.hostId === user.uid) {
+            setGame({
+              pin: savedPin,
+              status: data.status,
+              hostId: data.hostId,
+              questionIndex: data.currentQuestionIndex,
+              totalQuestions: data.totalQuestions,
+              questions: data.questions,
+              players: []
+            } as any);
+            setIsCreating(false);
+          } else {
+            handleExit();
+          }
+        } else {
+          handleExit();
+        }
+      }).catch(() => handleExit());
+    }
   }, [user?.uid]);
 
   // Sync Game State
@@ -524,7 +571,7 @@ function HostView({ user, onExit, showNotification }: {
       <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center">
         <div className="w-full max-w-4xl">
           <div className="flex justify-between items-center mb-8">
-            <button onClick={onExit} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all">
+            <button onClick={handleExit} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all">
               <LogOut size={24} />
             </button>
             <h2 className="text-3xl font-black tracking-tighter">QUIZ CREATOR</h2>
@@ -625,7 +672,7 @@ function HostView({ user, onExit, showNotification }: {
       <div className="min-h-screen bg-indigo-600 p-8 text-white flex flex-col">
         <div className="flex justify-between items-center mb-12">
           <div className="flex gap-2">
-            <button onClick={onExit} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all">
+            <button onClick={handleExit} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all">
               <LogOut size={24} />
             </button>
             <button onClick={() => setIsCreating(true)} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all flex items-center gap-2">
@@ -779,7 +826,7 @@ function HostView({ user, onExit, showNotification }: {
         </div>
 
         <button 
-          onClick={onExit}
+          onClick={handleExit}
           className="px-12 py-5 bg-white text-indigo-900 rounded-2xl font-black text-2xl shadow-xl hover:scale-105 transition-all"
         >
           BACK TO HOME
@@ -803,6 +850,13 @@ function PlayerView({ user, onExit, showNotification }: {
   const [me, setMe] = useState<Player | null>(null);
   const [hasAnswered, setHasAnswered] = useState(false);
 
+  const handleExit = () => {
+    localStorage.removeItem("mindspark_active_pin");
+    localStorage.removeItem("mindspark_user_role");
+    localStorage.removeItem("mindspark_player_name");
+    onExit();
+  };
+
   // Sync Game State
   useEffect(() => {
     if (!pin || !game) return;
@@ -825,10 +879,32 @@ function PlayerView({ user, onExit, showNotification }: {
         const data = snapshot.data() as Player;
         setMe(data);
         setHasAnswered(data.lastAnswer !== null && data.lastAnswer !== undefined);
+      } else if (game.status !== "lobby") {
+        // If player document is gone but game is active, they might have been kicked or error
+        handleExit();
       }
     }, (err) => handleFirestoreError(err, OperationType.GET, `games/${pin}/players/${user.uid}`));
     return () => unsubscribe();
   }, [pin, user?.uid, !!game]);
+
+  useEffect(() => {
+    // Check for existing session
+    const savedPin = localStorage.getItem("mindspark_active_pin");
+    const savedRole = localStorage.getItem("mindspark_user_role");
+    const savedName = localStorage.getItem("mindspark_player_name");
+    
+    if (savedPin && savedRole === "player" && savedName) {
+      setPin(savedPin);
+      setName(savedName);
+      getDoc(doc(db, "games", savedPin)).then(snap => {
+        if (snap.exists()) {
+          setGame(snap.data());
+        } else {
+          handleExit();
+        }
+      }).catch(() => handleExit());
+    }
+  }, []);
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -847,6 +923,10 @@ function PlayerView({ user, onExit, showNotification }: {
           joinedAt: serverTimestamp()
         });
         
+        localStorage.setItem("mindspark_active_pin", pin);
+        localStorage.setItem("mindspark_user_role", "player");
+        localStorage.setItem("mindspark_player_name", name);
+
         setGame(gameSnap.data());
         showNotification("Successfully joined the game!", "success");
       } catch (err) {
@@ -909,7 +989,7 @@ function PlayerView({ user, onExit, showNotification }: {
             </button>
           </form>
         </motion.div>
-        <button onClick={onExit} className="mt-8 text-indigo-200 font-bold flex items-center gap-2">
+        <button onClick={handleExit} className="mt-8 text-indigo-200 font-bold flex items-center gap-2">
           <LogOut size={20} /> BACK TO HOME
         </button>
       </div>
@@ -1005,7 +1085,7 @@ function PlayerView({ user, onExit, showNotification }: {
           <p className="text-7xl font-black tracking-tighter">{me?.score || 0}</p>
         </div>
         <button 
-          onClick={onExit}
+          onClick={handleExit}
           className="px-12 py-5 bg-indigo-600 text-white rounded-2xl font-black text-2xl shadow-xl hover:scale-105 transition-all border-b-4 border-indigo-800"
         >
           PLAY AGAIN
