@@ -1,4 +1,4 @@
-// QuizSpark v2.0 - REST API Version
+// MindSpark v2.0 - REST API Version
 import React, { useState, useEffect, useRef } from "react";
 import { 
   Trophy, 
@@ -159,7 +159,7 @@ export default function App() {
             </div>
           </div>
           <h1 className="text-6xl font-black mb-4 tracking-tighter drop-shadow-lg">
-            QUIZ<span className="text-indigo-400">SPARK</span>
+            MIND<span className="text-indigo-400">SPARK</span>
           </h1>
           <p className="text-indigo-200 text-xl mb-12 max-w-md mx-auto font-medium">
             The ultimate real-time quiz platform for classrooms, parties, and events.
