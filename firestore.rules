@@ -1,0 +1,113 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: games
+// Document ID: {pin} (6-digit string)
+// Fields:
+//   - pin: string (required)
+//   - status: string (required, ['lobby', 'playing', 'results', 'ended'])
+//   - hostId: string (required, UID of creator)
+//   - currentQuestionIndex: number (required)
+//   - totalQuestions: number (required)
+//   - createdAt: timestamp (required)
+//   - questions: list (required)
+//
+// Collection: games/{pin}/players
+// Document ID: {playerId} (UID)
+// Fields:
+//   - id: string (required, matches UID)
+//   - name: string (required, 1-20 chars)
+//   - score: number (required, >= 0)
+//   - lastAnswer: number (optional)
+//   - isCorrect: bool (optional)
+//   - joinedAt: timestamp (required)
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isHost(pin) {
+      return isAuthenticated() && request.auth.uid == get(/databases/$(database)/documents/games/$(pin)).data.hostId;
+    }
+
+    function isValidGame(data) {
+      return data.pin is string && data.pin.size() == 6 &&
+             data.status in ['lobby', 'playing', 'results', 'ended'] &&
+             data.hostId is string &&
+             data.currentQuestionIndex is number &&
+             data.totalQuestions is number &&
+             data.questions is list &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidPlayer(data) {
+      return data.id is string &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 20 &&
+             data.score is number && data.score >= 0 &&
+             data.joinedAt is timestamp &&
+             (!('lastAnswer' in data) || data.lastAnswer is number) &&
+             (!('isCorrect' in data) || data.isCorrect is bool);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /games/{pin} {
+      // Anyone authenticated can read a game (to join or watch)
+      allow read: if isAuthenticated();
+      
+      // Only authenticated users can create a game, and they must be the host
+      allow create: if isAuthenticated() && 
+                      isValidGame(request.resource.data) && 
+                      request.resource.data.hostId == request.auth.uid;
+      
+      // Only the host can update the game state
+      allow update: if isHost(pin) && 
+                      isValidGame(request.resource.data) &&
+                      request.resource.data.hostId == resource.data.hostId; // hostId is immutable
+
+      match /players/{playerId} {
+        // Host and the player themselves can read player data
+        allow read: if isAuthenticated() && (isHost(pin) || isOwner(playerId));
+        
+        // Players can join if they are authenticated and the game is in lobby
+        allow create: if isOwner(playerId) && 
+                        isValidPlayer(request.resource.data) &&
+                        get(/databases/$(database)/documents/games/$(pin)).data.status == 'lobby';
+        
+        // Players can update their own answers, Host can update scores
+        allow update: if isAuthenticated() && 
+                        isValidPlayer(request.resource.data) &&
+                        (
+                          // Player updating their own answer
+                          (isOwner(playerId) && 
+                           get(/databases/$(database)/documents/games/$(pin)).data.status == 'playing' &&
+                           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastAnswer', 'isCorrect', 'score'])) ||
+                          // Host updating scores/results
+                          isHost(pin)
+                        );
+      }
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

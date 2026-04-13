@@ -1,0 +1,50 @@
+{
+  "entities": {
+    "Game": {
+      "title": "Game",
+      "description": "Represents a quiz game session.",
+      "type": "object",
+      "properties": {
+        "pin": { "type": "string", "description": "Unique 6-digit game PIN." },
+        "status": { 
+          "type": "string", 
+          "enum": ["lobby", "playing", "results", "ended"],
+          "description": "Current status of the game."
+        },
+        "hostId": { "type": "string", "description": "UID of the game host." },
+        "currentQuestionIndex": { "type": "number", "description": "Index of the current question." },
+        "totalQuestions": { "type": "number", "description": "Total number of questions in the quiz." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the game was created." },
+        "questions": {
+          "type": "array",
+          "description": "List of quiz questions."
+        }
+      },
+      "required": ["pin", "status", "hostId", "currentQuestionIndex", "totalQuestions", "createdAt", "questions"]
+    },
+    "Player": {
+      "title": "Player",
+      "description": "Represents a player in a specific game.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "UID of the player." },
+        "name": { "type": "string", "description": "Nickname of the player." },
+        "score": { "type": "number", "description": "Current score of the player." },
+        "lastAnswer": { "type": "number", "description": "Index of the last submitted answer." },
+        "isCorrect": { "type": "boolean", "description": "Whether the last answer was correct." },
+        "joinedAt": { "type": "string", "format": "date-time", "description": "When the player joined the game." }
+      },
+      "required": ["id", "name", "score", "joinedAt"]
+    }
+  },
+  "firestore": {
+    "/games/{pin}": {
+      "schema": "Game",
+      "description": "Main game document."
+    },
+    "/games/{pin}/players/{playerId}": {
+      "schema": "Player",
+      "description": "Sub-collection of players in a game."
+    }
+  }
+}

@@ -1,4 +1,4 @@
-// MindSpark v2.0 - Local Version (No API Connections)
+// MindSpark v3.0 - Firebase Online Version
 import React, { useState, useEffect, useRef } from "react";
 import { 
   Trophy, 
@@ -8,7 +8,7 @@ import {
   XCircle, 
   Timer, 
   Layout, 
-  User, 
+  User as UserIcon, 
   Settings, 
   LogOut, 
   ChevronRight, 
@@ -16,11 +16,32 @@ import {
   Wifi,
   WifiOff,
   RefreshCw,
-  Loader2
+  Loader2,
+  LogIn
 } from "lucide-react";
 import confetti from "canvas-confetti";
 import { motion, AnimatePresence } from "framer-motion";
 import { v4 as uuidv4 } from "uuid";
+import { 
+  auth, 
+  db, 
+  googleProvider, 
+  signInWithPopup, 
+  signOut, 
+  onAuthStateChanged,
+  doc,
+  collection,
+  setDoc,
+  updateDoc,
+  onSnapshot,
+  getDoc,
+  query,
+  where,
+  orderBy,
+  limit,
+  deleteDoc
+} from "./firebase";
+import { serverTimestamp, Timestamp } from "firebase/firestore";
 
 // --- TYPES ---
 interface Question {
@@ -47,6 +68,30 @@ interface GameState {
   players: Player[];
   correctAnswer?: number;
   leaderboard?: Player[];
+  hostId: string;
+}
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: any[];
+  }
 }
 
 // --- CONSTANTS ---
@@ -92,114 +137,29 @@ const COLORS = [
 
 const SHAPES = ["▲", "◆", "●", "■"];
 
-// --- LOCAL SERVER SIMULATION (BroadcastChannel) ---
-// This allows multiple tabs to communicate without a real backend.
-const CHANNEL_NAME = "mindspark_local_sync";
-const channel = new BroadcastChannel(CHANNEL_NAME);
-
-// Global state for the "Server" tab
-let localGames: Record<string, any> = {};
-
-// Helper to broadcast state
-const broadcastState = (pin: string) => {
-  const game = localGames[pin];
-  if (!game) return;
-  
-  channel.postMessage({
-    type: "STATE_UPDATE",
-    pin,
-    state: {
-      status: game.status,
-      question: game.status === "playing" ? game.questions[game.currentQuestionIndex] : null,
-      currentQuestionIndex: game.currentQuestionIndex,
-      totalQuestions: game.questions.length,
-      players: game.players,
-      correctAnswer: game.status === "results" ? game.questions[game.currentQuestionIndex].correctAnswer : null,
-      leaderboard: game.status === "ended" ? [...game.players].sort((a, b) => b.score - a.score) : null
-    }
-  });
-};
-
-// Listen for requests (The Host tab acts as the "Server")
-channel.onmessage = (event) => {
-  const { type, payload, pin: msgPin, state: msgState } = event.data;
-  
-  // If it's a state update, all tabs (Host and Players) update their local view
-  if (type === "STATE_UPDATE") {
-    const event = new CustomEvent("mindspark_state_sync", { detail: { pin: msgPin, state: msgState } });
-    window.dispatchEvent(event);
-    return;
-  }
-
-  // Only the tab that "owns" the game (the Host) should process logic
-  // We check if the game exists in our local memory
-  const game = localGames[payload?.pin || msgPin];
-  if (!game) return;
-
-  switch (type) {
-    case "JOIN_GAME": {
-      const { name, playerId } = payload;
-      if (game.status === "lobby") {
-        if (!game.players.find((p: any) => p.id === playerId)) {
-          game.players.push({ id: playerId, name, score: 0 });
-          broadcastState(game.pin);
-        }
-      }
-      break;
-    }
-    case "START_GAME": {
-      const { hostId } = payload;
-      if (game.hostId === hostId) {
-        game.status = "playing";
-        game.currentQuestionIndex = 0;
-        broadcastState(game.pin);
-      }
-      break;
-    }
-    case "SUBMIT_ANSWER": {
-      const { playerId, answerIndex } = payload;
-      if (game.status === "playing") {
-        const player = game.players.find((p: any) => p.id === playerId);
-        const question = game.questions[game.currentQuestionIndex];
-        
-        if (player && player.lastAnswer === undefined) {
-          player.lastAnswer = answerIndex;
-          player.isCorrect = answerIndex === question.correctAnswer;
-          if (player.isCorrect) player.score += 100;
-          
-          if (game.players.every((p: any) => p.lastAnswer !== undefined)) {
-            game.status = "results";
-          }
-          broadcastState(game.pin);
-        }
-      }
-      break;
-    }
-    case "NEXT_QUESTION": {
-      const { hostId } = payload;
-      if (game.hostId === hostId) {
-        if (game.currentQuestionIndex < game.questions.length - 1) {
-          game.currentQuestionIndex++;
-          game.status = "playing";
-          game.players.forEach((p: any) => {
-            delete p.lastAnswer;
-            delete p.isCorrect;
-          });
-        } else {
-          game.status = "ended";
-        }
-        broadcastState(game.pin);
-      }
-      break;
-    }
-    case "REQUEST_STATE": {
-      broadcastState(game.pin);
-      break;
-    }
-  }
-};
-
-// --- COMPONENTS ---
+// --- UTILS ---
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 const Toast = ({ message, type, onClose }: { message: string; type: "error" | "info" | "success"; onClose: () => void }) => (
   <motion.div
@@ -220,33 +180,81 @@ const Toast = ({ message, type, onClose }: { message: string; type: "error" | "i
   </motion.div>
 );
 
+function LoadingScreen({ message }: { message: string }) {
+  return (
+    <div className="min-h-screen bg-indigo-900 flex flex-col items-center justify-center p-6 text-white">
+      <div className="w-20 h-20 border-8 border-indigo-400 border-t-white rounded-full animate-spin mb-8" />
+      <p className="text-2xl font-black tracking-widest animate-pulse uppercase">{message}</p>
+    </div>
+  );
+}
+
+// --- MAIN APP ---
 export default function App() {
+  const [user, setUser] = useState<any>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
   const [view, setView] = useState<"landing" | "host" | "player">("landing");
   const [notification, setNotification] = useState<{ message: string; type: "error" | "info" | "success" } | null>(null);
-  const [playerId] = useState(() => {
-    const saved = localStorage.getItem("quiz_player_id");
-    if (saved) return saved;
-    const id = uuidv4();
-    localStorage.setItem("quiz_player_id", id);
-    return id;
-  });
-  const [hostId] = useState(() => {
-    const saved = localStorage.getItem("quiz_host_id");
-    if (saved) return saved;
-    const id = uuidv4();
-    localStorage.setItem("quiz_host_id", id);
-    return id;
-  });
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setIsAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
 
   const showNotification = (message: string, type: "error" | "info" | "success" = "info") => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 5000);
   };
 
+  const handleLogin = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+      showNotification("Logged in successfully!", "success");
+    } catch (err) {
+      showNotification("Login failed", "error");
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setView("landing");
+      showNotification("Logged out", "info");
+    } catch (err) {
+      showNotification("Logout failed", "error");
+    }
+  };
+
+  if (!isAuthReady) return <LoadingScreen message="Connecting to MindSpark..." />;
+
   if (view === "landing") {
     return (
       <div className="min-h-screen bg-indigo-900 flex flex-col items-center justify-center p-6 text-white overflow-hidden relative">
-        {/* Background Elements */}
+        <div className="absolute top-4 right-4 z-20">
+          {user ? (
+            <div className="flex items-center gap-3 bg-white/10 p-2 pr-4 rounded-full backdrop-blur-md border border-white/10">
+              <img src={user.photoURL} alt={user.displayName} className="w-10 h-10 rounded-full border-2 border-white/20" referrerPolicy="no-referrer" />
+              <div className="hidden sm:block">
+                <p className="text-xs font-bold opacity-60 uppercase">Logged in as</p>
+                <p className="text-sm font-black">{user.displayName}</p>
+              </div>
+              <button onClick={handleLogout} className="ml-2 p-2 hover:bg-white/10 rounded-full transition-all">
+                <LogOut size={18} />
+              </button>
+            </div>
+          ) : (
+            <button 
+              onClick={handleLogin}
+              className="px-6 py-3 bg-white text-indigo-900 rounded-full font-black flex items-center gap-2 shadow-xl hover:scale-105 transition-all"
+            >
+              <LogIn size={20} /> LOGIN TO PLAY
+            </button>
+          )}
+        </div>
+
         <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
           <div className="absolute top-10 left-10 w-64 h-64 bg-white rounded-full blur-3xl animate-pulse" />
           <div className="absolute bottom-10 right-10 w-96 h-96 bg-purple-500 rounded-full blur-3xl animate-pulse" />
@@ -277,7 +285,10 @@ export default function App() {
               <Users size={28} /> JOIN GAME
             </button>
             <button 
-              onClick={() => setView("host")}
+              onClick={() => {
+                if (!user) return showNotification("Please login to host a game", "error");
+                setView("host");
+              }}
               className="px-12 py-5 bg-indigo-600 text-white rounded-2xl font-black text-2xl shadow-xl hover:scale-105 transition-all active:scale-95 border-b-4 border-indigo-800 flex items-center gap-3"
             >
               <Play size={28} /> HOST GAME
@@ -285,7 +296,7 @@ export default function App() {
           </div>
           
           <p className="mt-8 text-indigo-300 font-bold text-sm opacity-50">
-            LOCAL VERSION - NO SERVER REQUIRED
+            ONLINE VERSION - REAL-TIME MULTIPLAYER
           </p>
         </motion.div>
         
@@ -305,9 +316,9 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-100">
       {view === "host" ? (
-        <HostView hostId={hostId} onExit={() => setView("landing")} showNotification={showNotification} />
+        <HostView user={user} onExit={() => setView("landing")} showNotification={showNotification} />
       ) : (
-        <PlayerView playerId={playerId} onExit={() => setView("landing")} showNotification={showNotification} />
+        <PlayerView user={user} onExit={() => setView("landing")} showNotification={showNotification} />
       )}
       
       <AnimatePresence>
@@ -324,70 +335,106 @@ export default function App() {
 }
 
 // --- HOST VIEW ---
-function HostView({ hostId, onExit, showNotification }: { 
-  hostId: string, 
+function HostView({ user, onExit, showNotification }: { 
+  user: any, 
   onExit: () => void,
   showNotification: (m: string, t?: "error" | "info" | "success") => void 
 }) {
   const [game, setGame] = useState<GameState | null>(null);
+  const [players, setPlayers] = useState<Player[]>([]);
 
-  const createGame = (questions: Question[]) => {
+  const createGame = async (questions: Question[]) => {
     const pin = Math.floor(100000 + Math.random() * 900000).toString();
-    channel.postMessage({
-      type: "CREATE_GAME",
-      payload: { pin, questions, hostId }
-    });
+    const gameRef = doc(db, "games", pin);
     
-    setGame({
+    const newGame = {
       pin,
       status: "lobby",
-      questionIndex: 0,
+      hostId: user.uid,
+      currentQuestionIndex: 0,
       totalQuestions: questions.length,
-      players: []
-    });
-  };
-
-  const startGame = () => {
-    if (!game) return;
-    channel.postMessage({
-      type: "START_GAME",
-      payload: { pin: game.pin, hostId }
-    });
-  };
-
-  const nextQuestion = () => {
-    if (!game) return;
-    channel.postMessage({
-      type: "NEXT_QUESTION",
-      payload: { pin: game.pin, hostId }
-    });
-  };
-
-  useEffect(() => {
-    createGame(DEFAULT_QUESTIONS);
-  }, []);
-
-  useEffect(() => {
-    const handleSync = (e: any) => {
-      const { pin, state } = e.detail;
-      if (game?.pin === pin) {
-        setGame(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            ...state,
-            currentQuestion: state.question,
-            questionIndex: state.currentQuestionIndex
-          };
-        });
-      }
+      createdAt: serverTimestamp(),
+      questions: questions
     };
 
-    window.addEventListener("mindspark_state_sync", handleSync);
-    return () => window.removeEventListener("mindspark_state_sync", handleSync);
+    try {
+      await setDoc(gameRef, newGame);
+      setGame({
+        ...newGame,
+        createdAt: new Date() as any,
+        players: []
+      } as any);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `games/${pin}`);
+    }
+  };
+
+  const startGame = async () => {
+    if (!game) return;
+    try {
+      await updateDoc(doc(db, "games", game.pin), { status: "playing" });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `games/${game.pin}`);
+    }
+  };
+
+  const nextQuestion = async () => {
+    if (!game) return;
+    const isLast = game.questionIndex >= game.totalQuestions - 1;
+    try {
+      if (isLast) {
+        await updateDoc(doc(db, "games", game.pin), { status: "ended" });
+      } else {
+        // Reset players' answers for next question
+        const batchUpdates = players.map(p => 
+          updateDoc(doc(db, "games", game.pin, "players", p.id), {
+            lastAnswer: null,
+            isCorrect: null
+          })
+        );
+        await Promise.all(batchUpdates);
+        await updateDoc(doc(db, "games", game.pin), { 
+          status: "playing",
+          currentQuestionIndex: game.questionIndex + 1
+        });
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `games/${game.pin}`);
+    }
+  };
+
+  useEffect(() => {
+    if (user) createGame(DEFAULT_QUESTIONS);
+  }, [user?.uid]);
+
+  // Sync Game State
+  useEffect(() => {
+    if (!game?.pin) return;
+    const unsubscribe = onSnapshot(doc(db, "games", game.pin), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        setGame(prev => ({
+          ...prev!,
+          status: data.status,
+          questionIndex: data.currentQuestionIndex,
+          currentQuestion: data.questions[data.currentQuestionIndex]
+        }));
+      }
+    }, (err) => handleFirestoreError(err, OperationType.GET, `games/${game.pin}`));
+    return () => unsubscribe();
   }, [game?.pin]);
 
-  if (!game) return <LoadingScreen message="Initializing Local Game..." />;
+  // Sync Players
+  useEffect(() => {
+    if (!game?.pin) return;
+    const unsubscribe = onSnapshot(collection(db, "games", game.pin, "players"), (snapshot) => {
+      const pList = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Player));
+      setPlayers(pList);
+    }, (err) => handleFirestoreError(err, OperationType.GET, `games/${game.pin}/players`));
+    return () => unsubscribe();
+  }, [game?.pin]);
+
+  if (!game) return <LoadingScreen message="Initializing Online Game..." />;
 
   if (game.status === "lobby") {
     return (
@@ -397,21 +444,21 @@ function HostView({ hostId, onExit, showNotification }: {
             <LogOut size={24} />
           </button>
           <div className="text-center">
-            <p className="text-indigo-200 font-bold uppercase tracking-widest text-sm mb-1">Join in another tab</p>
+            <p className="text-indigo-200 font-bold uppercase tracking-widest text-sm mb-1">Join at MindSpark Online</p>
             <div className="bg-white text-indigo-900 px-10 py-4 rounded-3xl shadow-2xl inline-block">
               <h2 className="text-6xl font-black tracking-tighter">{game.pin}</h2>
             </div>
           </div>
           <div className="flex items-center gap-3 bg-white/10 px-6 py-3 rounded-2xl">
             <Users size={24} />
-            <span className="text-2xl font-bold">{game.players.length}</span>
+            <span className="text-2xl font-bold">{players.length}</span>
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto mb-8">
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
             <AnimatePresence>
-              {game.players.map((p) => (
+              {players.map((p) => (
                 <motion.div 
                   key={p.id}
                   initial={{ scale: 0, opacity: 0 }}
@@ -424,7 +471,7 @@ function HostView({ hostId, onExit, showNotification }: {
               ))}
             </AnimatePresence>
           </div>
-          {game.players.length === 0 && (
+          {players.length === 0 && (
             <div className="h-full flex flex-col items-center justify-center opacity-40">
               <Users size={128} className="mb-4" />
               <p className="text-3xl font-black">WAITING FOR PLAYERS...</p>
@@ -434,7 +481,7 @@ function HostView({ hostId, onExit, showNotification }: {
 
         <div className="flex justify-center">
           <button 
-            disabled={game.players.length === 0}
+            disabled={players.length === 0}
             onClick={startGame}
             className="px-16 py-6 bg-green-500 text-white rounded-3xl font-black text-3xl shadow-2xl hover:scale-105 transition-all disabled:opacity-50 disabled:scale-100 border-b-8 border-green-700 active:border-b-0 active:translate-y-2"
           >
@@ -446,7 +493,15 @@ function HostView({ hostId, onExit, showNotification }: {
   }
 
   if (game.status === "playing" && game.currentQuestion) {
-    const answeredCount = game.players.filter(p => p.lastAnswer !== undefined).length;
+    const answeredCount = players.filter(p => p.lastAnswer !== null && p.lastAnswer !== undefined).length;
+    
+    // Auto-move to results if everyone answered
+    useEffect(() => {
+      if (players.length > 0 && answeredCount === players.length && game.status === "playing") {
+        updateDoc(doc(db, "games", game.pin), { status: "results" });
+      }
+    }, [answeredCount, players.length, game.status]);
+
     return (
       <div className="min-h-screen bg-indigo-900 flex flex-col p-8 text-white">
         <div className="flex justify-between items-center mb-8">
@@ -455,7 +510,7 @@ function HostView({ hostId, onExit, showNotification }: {
           </div>
           <div className="flex items-center gap-4">
             <div className="bg-white/10 px-6 py-3 rounded-2xl font-bold text-xl flex items-center gap-2">
-              <Users size={20} /> {answeredCount} / {game.players.length}
+              <Users size={20} /> {answeredCount} / {players.length}
             </div>
           </div>
         </div>
@@ -490,7 +545,7 @@ function HostView({ hostId, onExit, showNotification }: {
         
         <div className="flex-1 max-w-2xl mx-auto w-full overflow-y-auto mb-8 bg-black/20 rounded-3xl p-8 backdrop-blur-md">
           <div className="space-y-4">
-            {game.players.sort((a, b) => b.score - a.score).map((p, i) => (
+            {players.sort((a, b) => b.score - a.score).map((p, i) => (
               <div key={p.id} className="flex justify-between items-center bg-white/10 p-5 rounded-2xl border border-white/5">
                 <div className="flex items-center gap-4">
                   <span className="text-2xl font-black text-indigo-300">#{i + 1}</span>
@@ -518,7 +573,7 @@ function HostView({ hostId, onExit, showNotification }: {
   }
 
   if (game.status === "ended") {
-    const leaderboard = game.leaderboard || [...game.players].sort((a, b) => b.score - a.score);
+    const leaderboard = [...players].sort((a, b) => b.score - a.score);
     return (
       <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center justify-center">
         <Trophy size={128} className="text-yellow-400 mb-8 animate-bounce" />
@@ -557,75 +612,88 @@ function HostView({ hostId, onExit, showNotification }: {
 }
 
 // --- PLAYER VIEW ---
-function PlayerView({ playerId, onExit, showNotification }: { 
-  playerId: string, 
+function PlayerView({ user, onExit, showNotification }: { 
+  user: any, 
   onExit: () => void,
   showNotification: (m: string, t?: "error" | "info" | "success") => void 
 }) {
   const [pin, setPin] = useState("");
   const [name, setName] = useState("");
-  const [status, setStatus] = useState<"join" | "lobby" | "playing" | "results" | "ended">("join");
-  const [currentQuestion, setCurrentQuestion] = useState<any>(null);
+  const [game, setGame] = useState<any>(null);
+  const [me, setMe] = useState<Player | null>(null);
   const [hasAnswered, setHasAnswered] = useState(false);
-  const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
-  const [score, setScore] = useState(0);
 
+  // Sync Game State
   useEffect(() => {
-    if (!pin) return;
-
-    const handleSync = (e: any) => {
-      const { pin: msgPin, state } = e.detail;
-      if (pin === msgPin) {
-        setStatus(state.status);
-        if (state.status === "playing") {
-          setCurrentQuestion(state.question);
-          const me = state.players.find((p: any) => p.id === playerId);
-          setHasAnswered(me?.lastAnswer !== undefined);
-        } else if (state.status === "results") {
-          const me = state.players.find((p: any) => p.id === playerId);
-          if (me) {
-            setIsCorrect(me.isCorrect);
-            setScore(me.score);
-          }
-        } else if (state.status === "ended") {
-          const me = state.players.find((p: any) => p.id === playerId);
-          if (me) setScore(me.score);
-        }
+    if (!pin || !game) return;
+    const unsubscribe = onSnapshot(doc(db, "games", pin), (snapshot) => {
+      if (snapshot.exists()) {
+        setGame(snapshot.data());
+      } else {
+        showNotification("Game not found", "error");
+        onExit();
       }
-    };
+    }, (err) => handleFirestoreError(err, OperationType.GET, `games/${pin}`));
+    return () => unsubscribe();
+  }, [pin, !!game]);
 
-    window.addEventListener("mindspark_state_sync", handleSync);
-    return () => window.removeEventListener("mindspark_state_sync", handleSync);
-  }, [pin, playerId]);
+  // Sync My Player State
+  useEffect(() => {
+    if (!pin || !user || !game) return;
+    const unsubscribe = onSnapshot(doc(db, "games", pin, "players", user.uid), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data() as Player;
+        setMe(data);
+        setHasAnswered(data.lastAnswer !== null && data.lastAnswer !== undefined);
+      }
+    }, (err) => handleFirestoreError(err, OperationType.GET, `games/${pin}/players/${user.uid}`));
+    return () => unsubscribe();
+  }, [pin, user?.uid, !!game]);
 
-  const handleJoin = (e: React.FormEvent) => {
+  const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return showNotification("Please login to join", "error");
     if (pin && name) {
-      channel.postMessage({
-        type: "JOIN_GAME",
-        payload: { pin, name, playerId }
-      });
-      channel.postMessage({
-        type: "REQUEST_STATE",
-        payload: { pin }
-      });
-      setStatus("lobby");
-      showNotification("Successfully joined the game!", "success");
+      try {
+        const gameSnap = await getDoc(doc(db, "games", pin));
+        if (!gameSnap.exists()) throw new Error("Game not found");
+        if (gameSnap.data().status !== "lobby") throw new Error("Game already started");
+
+        const playerRef = doc(db, "games", pin, "players", user.uid);
+        await setDoc(playerRef, {
+          id: user.uid,
+          name,
+          score: 0,
+          joinedAt: serverTimestamp()
+        });
+        
+        setGame(gameSnap.data());
+        showNotification("Successfully joined the game!", "success");
+      } catch (err) {
+        showNotification(err instanceof Error ? err.message : "Failed to join", "error");
+      }
     }
   };
 
-  const handleAnswer = (index: number) => {
-    if (!hasAnswered) {
+  const handleAnswer = async (index: number) => {
+    if (!hasAnswered && me && game) {
       setHasAnswered(true);
-      channel.postMessage({
-        type: "SUBMIT_ANSWER",
-        payload: { pin, playerId, answerIndex: index }
-      });
-      showNotification("Answer submitted!", "success");
+      const isCorrect = index === game.questions[game.currentQuestionIndex].correctAnswer;
+      try {
+        await updateDoc(doc(db, "games", pin, "players", user.uid), {
+          lastAnswer: index,
+          isCorrect: isCorrect,
+          score: isCorrect ? me.score + 100 : me.score
+        });
+        showNotification("Answer submitted!", "success");
+      } catch (err) {
+        setHasAnswered(false);
+        showNotification("Failed to submit answer", "error");
+      }
     }
   };
 
-  if (status === "join") {
+  if (!game) {
     return (
       <div className="min-h-screen bg-indigo-700 flex flex-col items-center justify-center p-6 text-white">
         <motion.div 
@@ -668,11 +736,11 @@ function PlayerView({ playerId, onExit, showNotification }: {
     );
   }
 
-  if (status === "lobby") {
+  if (game.status === "lobby") {
     return (
       <div className="min-h-screen bg-indigo-600 flex flex-col items-center justify-center p-6 text-white text-center">
         <div className="bg-white/20 p-8 rounded-full mb-8 animate-pulse">
-          <User size={64} />
+          <UserIcon size={64} />
         </div>
         <h2 className="text-4xl font-black mb-2">{name}</h2>
         <p className="text-xl text-indigo-200 font-bold">You're in! See your name on screen?</p>
@@ -684,7 +752,7 @@ function PlayerView({ playerId, onExit, showNotification }: {
     );
   }
 
-  if (status === "playing") {
+  if (game.status === "playing") {
     return (
       <div className="min-h-screen bg-gray-100 flex flex-col">
         <div className="bg-white p-4 shadow-md flex justify-between items-center">
@@ -695,14 +763,14 @@ function PlayerView({ playerId, onExit, showNotification }: {
             <span className="font-bold">{name}</span>
           </div>
           <div className="bg-indigo-100 px-4 py-2 rounded-xl font-black text-indigo-900">
-            {score}
+            {me?.score || 0}
           </div>
         </div>
 
         <div className="flex-1 p-4 flex flex-col gap-4">
           {!hasAnswered ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 h-full">
-              {currentQuestion?.options.map((_, i) => (
+              {game.questions[game.currentQuestionIndex]?.options.map((_, i) => (
                 <button 
                   key={i}
                   onClick={() => handleAnswer(i)}
@@ -726,27 +794,27 @@ function PlayerView({ playerId, onExit, showNotification }: {
     );
   }
 
-  if (status === "results") {
+  if (game.status === "results") {
     return (
-      <div className={`min-h-screen ${isCorrect ? "bg-green-500" : "bg-red-500"} flex flex-col items-center justify-center p-6 text-white text-center`}>
+      <div className={`min-h-screen ${me?.isCorrect ? "bg-green-500" : "bg-red-500"} flex flex-col items-center justify-center p-6 text-white text-center`}>
         <div className="bg-white/20 p-12 rounded-full mb-8">
-          {isCorrect ? <CheckCircle2 size={96} /> : <XCircle size={96} />}
+          {me?.isCorrect ? <CheckCircle2 size={96} /> : <XCircle size={96} />}
         </div>
         <h2 className="text-6xl font-black mb-4 uppercase tracking-tighter">
-          {isCorrect ? "CORRECT!" : "WRONG!"}
+          {me?.isCorrect ? "CORRECT!" : "WRONG!"}
         </h2>
         <p className="text-2xl font-bold opacity-80 mb-8">
-          {isCorrect ? "+100 Points" : "Better luck next time!"}
+          {me?.isCorrect ? "+100 Points" : "Better luck next time!"}
         </p>
         <div className="bg-black/20 px-10 py-5 rounded-3xl backdrop-blur-md">
           <p className="text-sm uppercase tracking-widest font-bold opacity-60 mb-1">Current Score</p>
-          <p className="text-5xl font-black">{score}</p>
+          <p className="text-5xl font-black">{me?.score || 0}</p>
         </div>
       </div>
     );
   }
 
-  if (status === "ended") {
+  if (game.status === "ended") {
     return (
       <div className="min-h-screen bg-indigo-900 flex flex-col items-center justify-center p-6 text-white text-center">
         <Trophy size={96} className="text-yellow-400 mb-8" />
@@ -754,7 +822,7 @@ function PlayerView({ playerId, onExit, showNotification }: {
         <p className="text-2xl font-bold text-indigo-200 mb-12">Great effort, {name}!</p>
         <div className="bg-white text-indigo-900 p-10 rounded-3xl shadow-2xl mb-12">
           <p className="text-lg uppercase tracking-widest font-black opacity-40 mb-2">Final Score</p>
-          <p className="text-7xl font-black tracking-tighter">{score}</p>
+          <p className="text-7xl font-black tracking-tighter">{me?.score || 0}</p>
         </div>
         <button 
           onClick={onExit}
@@ -767,14 +835,4 @@ function PlayerView({ playerId, onExit, showNotification }: {
   }
 
   return null;
-}
-
-// --- UTILS ---
-function LoadingScreen({ message }: { message: string }) {
-  return (
-    <div className="min-h-screen bg-indigo-900 flex flex-col items-center justify-center p-6 text-white">
-      <div className="w-20 h-20 border-8 border-indigo-400 border-t-white rounded-full animate-spin mb-8" />
-      <p className="text-2xl font-black tracking-widest animate-pulse uppercase">{message}</p>
-    </div>
-  );
 }
