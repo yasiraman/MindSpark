@@ -17,7 +17,11 @@ import {
   WifiOff,
   RefreshCw,
   Loader2,
-  LogIn
+  LogIn,
+  Plus,
+  Trash2,
+  Save,
+  Edit3
 } from "lucide-react";
 import confetti from "canvas-confetti";
 import { motion, AnimatePresence } from "framer-motion";
@@ -342,6 +346,8 @@ function HostView({ user, onExit, showNotification }: {
 }) {
   const [game, setGame] = useState<GameState | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
+  const [isCreating, setIsCreating] = useState(true);
+  const [customQuestions, setCustomQuestions] = useState<Question[]>(DEFAULT_QUESTIONS);
 
   const createGame = async (questions: Question[]) => {
     const pin = Math.floor(100000 + Math.random() * 900000).toString();
@@ -364,6 +370,7 @@ function HostView({ user, onExit, showNotification }: {
         createdAt: new Date() as any,
         players: []
       } as any);
+      setIsCreating(false);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `games/${pin}`);
     }
@@ -404,7 +411,7 @@ function HostView({ user, onExit, showNotification }: {
   };
 
   useEffect(() => {
-    if (user) createGame(DEFAULT_QUESTIONS);
+    // We no longer auto-create on mount, we wait for the host to finish creating
   }, [user?.uid]);
 
   // Sync Game State
@@ -434,15 +441,119 @@ function HostView({ user, onExit, showNotification }: {
     return () => unsubscribe();
   }, [game?.pin]);
 
+  if (isCreating) {
+    return (
+      <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center">
+        <div className="w-full max-w-4xl">
+          <div className="flex justify-between items-center mb-8">
+            <button onClick={onExit} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all">
+              <LogOut size={24} />
+            </button>
+            <h2 className="text-3xl font-black tracking-tighter">QUIZ CREATOR</h2>
+            <div className="w-12" />
+          </div>
+
+          <div className="space-y-6 mb-12">
+            {customQuestions.map((q, qIdx) => (
+              <motion.div 
+                key={qIdx}
+                initial={{ x: -20, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                className="bg-white/10 p-6 rounded-3xl border border-white/10 backdrop-blur-md"
+              >
+                <div className="flex justify-between items-start mb-4">
+                  <span className="bg-indigo-500 px-4 py-1 rounded-full text-xs font-black uppercase">Question {qIdx + 1}</span>
+                  <button 
+                    onClick={() => setCustomQuestions(prev => prev.filter((_, i) => i !== qIdx))}
+                    className="text-red-400 hover:text-red-300 transition-all"
+                  >
+                    <Trash2 size={20} />
+                  </button>
+                </div>
+                
+                <input 
+                  type="text"
+                  value={q.text}
+                  onChange={(e) => {
+                    const newQs = [...customQuestions];
+                    newQs[qIdx].text = e.target.value;
+                    setCustomQuestions(newQs);
+                  }}
+                  placeholder="Enter your question here..."
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 mb-4 text-xl font-bold focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                />
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {q.options.map((opt, oIdx) => (
+                    <div key={oIdx} className="flex items-center gap-3">
+                      <button 
+                        onClick={() => {
+                          const newQs = [...customQuestions];
+                          newQs[qIdx].correctAnswer = oIdx;
+                          setCustomQuestions(newQs);
+                        }}
+                        className={`w-10 h-10 rounded-full flex items-center justify-center font-black transition-all ${
+                          q.correctAnswer === oIdx ? "bg-green-500 text-white scale-110 shadow-lg" : "bg-white/10 text-white/40 hover:bg-white/20"
+                        }`}
+                      >
+                        {q.correctAnswer === oIdx ? <CheckCircle2 size={20} /> : SHAPES[oIdx]}
+                      </button>
+                      <input 
+                        type="text"
+                        value={opt}
+                        onChange={(e) => {
+                          const newQs = [...customQuestions];
+                          newQs[qIdx].options[oIdx] = e.target.value;
+                          setCustomQuestions(newQs);
+                        }}
+                        placeholder={`Option ${oIdx + 1}`}
+                        className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            ))}
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-4 justify-center sticky bottom-8">
+            <button 
+              onClick={() => setCustomQuestions(prev => [...prev, { text: "", options: ["", "", "", ""], correctAnswer: 0, timeLimit: 20 }])}
+              className="px-8 py-4 bg-indigo-600 text-white rounded-2xl font-black flex items-center gap-2 shadow-xl hover:scale-105 transition-all"
+            >
+              <Plus size={24} /> ADD QUESTION
+            </button>
+            <button 
+              onClick={() => {
+                if (customQuestions.some(q => !q.text || q.options.some(o => !o))) {
+                  return showNotification("Please fill in all questions and options", "error");
+                }
+                createGame(customQuestions);
+              }}
+              className="px-12 py-4 bg-green-500 text-white rounded-2xl font-black text-xl flex items-center gap-2 shadow-xl hover:scale-105 transition-all border-b-4 border-green-700 active:border-b-0 active:translate-y-1"
+            >
+              <Save size={24} /> CREATE GAME
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!game) return <LoadingScreen message="Initializing Online Game..." />;
 
   if (game.status === "lobby") {
     return (
       <div className="min-h-screen bg-indigo-600 p-8 text-white flex flex-col">
         <div className="flex justify-between items-center mb-12">
-          <button onClick={onExit} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all">
-            <LogOut size={24} />
-          </button>
+          <div className="flex gap-2">
+            <button onClick={onExit} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all">
+              <LogOut size={24} />
+            </button>
+            <button onClick={() => setIsCreating(true)} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all flex items-center gap-2">
+              <Edit3 size={24} /> <span className="font-bold hidden sm:inline">EDIT QUIZ</span>
+            </button>
+          </div>
           <div className="text-center">
             <p className="text-indigo-200 font-bold uppercase tracking-widest text-sm mb-1">Join at MindSpark Online</p>
             <div className="bg-white text-indigo-900 px-10 py-4 rounded-3xl shadow-2xl inline-block">
