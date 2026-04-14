@@ -325,15 +325,23 @@ function MainApp() {
       <div className="min-h-screen bg-indigo-900 flex flex-col items-center justify-center p-6 text-white overflow-hidden relative">
         <div className="absolute top-4 right-4 z-20">
           {user ? (
-            <div className="flex items-center gap-3 bg-white/10 p-2 pr-4 rounded-full backdrop-blur-md border border-white/10">
-              <img src={user.photoURL} alt={user.displayName} className="w-10 h-10 rounded-full border-2 border-white/20" referrerPolicy="no-referrer" />
-              <div className="hidden sm:block">
-                <p className="text-xs font-bold opacity-60 uppercase">Logged in as</p>
-                <p className="text-sm font-black">{user.displayName}</p>
-              </div>
-              <button onClick={handleLogout} className="ml-2 p-2 hover:bg-white/10 rounded-full transition-all">
-                <LogOut size={18} />
+            <div className="flex items-center gap-4">
+              <button 
+                onClick={() => setView("host")}
+                className="flex items-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 bg-indigo-600/80 hover:bg-indigo-600 text-white rounded-full font-bold transition-all border border-white/20 backdrop-blur-sm text-xs sm:text-sm"
+              >
+                <Layout size={16} /> <span className="hidden xs:inline">DASHBOARD</span>
               </button>
+              <div className="flex items-center gap-3 bg-white/10 p-2 pr-4 rounded-full backdrop-blur-md border border-white/10">
+                <img src={user.photoURL} alt={user.displayName} className="w-10 h-10 rounded-full border-2 border-white/20" referrerPolicy="no-referrer" />
+                <div className="hidden sm:block">
+                  <p className="text-xs font-bold opacity-60 uppercase">Logged in as</p>
+                  <p className="text-sm font-black">{user.displayName}</p>
+                </div>
+                <button onClick={handleLogout} className="ml-2 p-2 hover:bg-white/10 rounded-full transition-all">
+                  <LogOut size={18} />
+                </button>
+              </div>
             </div>
           ) : (
             <button 
