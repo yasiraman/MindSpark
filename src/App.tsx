@@ -29,6 +29,7 @@ import {
   LogOut, 
   ChevronRight, 
   AlertCircle,
+  Activity,
   Wifi,
   WifiOff,
   RefreshCw,
@@ -679,6 +680,7 @@ function HostView({ user, userProfile, onExit, onJoinGame, showNotification }: {
       currentQuestionIndex: 0,
       totalQuestions: questions.length,
       createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
       questions: questions,
       branding: isPremium ? {
         logoUrl: brandLogo,
@@ -745,7 +747,10 @@ function HostView({ user, userProfile, onExit, onJoinGame, showNotification }: {
   const startGame = async () => {
     if (!game) return;
     try {
-      await updateDoc(doc(db, "games", game.pin), { status: "playing" });
+      await updateDoc(doc(db, "games", game.pin), { 
+        status: "playing",
+        updatedAt: serverTimestamp()
+      });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `games/${game.pin}`);
     }
@@ -773,7 +778,8 @@ function HostView({ user, userProfile, onExit, onJoinGame, showNotification }: {
 
         batch.update(doc(db, "games", game.pin), { 
           status: "playing",
-          currentQuestionIndex: game.questionIndex + 1
+          currentQuestionIndex: game.questionIndex + 1,
+          updatedAt: serverTimestamp()
         });
       }
       
@@ -1237,22 +1243,36 @@ function HostView({ user, userProfile, onExit, onJoinGame, showNotification }: {
   // --- ADMIN DASHBOARD ---
   const AdminDashboard = () => {
     const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+    const [activeGamesCount, setActiveGamesCount] = useState(0);
     const [loading, setLoading] = useState(true);
+    const [confirmingUser, setConfirmingUser] = useState<UserProfile | null>(null);
+    const [deletingUser, setDeletingUser] = useState<UserProfile | null>(null);
 
     useEffect(() => {
-      const q = collection(db, "users");
-      const unsubscribe = onSnapshot(q, (snap) => {
+      // Fetch Users
+      const qUsers = collection(db, "users");
+      const unsubUsers = onSnapshot(qUsers, (snap) => {
         const users = snap.docs.map(d => d.data() as UserProfile);
-        // Sort by updatedAt desc client-side
-        users.sort((a, b) => {
-          const timeA = a.updatedAt?.toMillis() || 0;
-          const timeB = b.updatedAt?.toMillis() || 0;
-          return timeB - timeA;
-        });
+        users.sort((a, b) => (b.updatedAt?.toMillis() || 0) - (a.updatedAt?.toMillis() || 0));
         setAllUsers(users);
         setLoading(false);
       }, (err) => handleFirestoreError(err, OperationType.LIST, "users"));
-      return () => unsubscribe();
+
+      // Fetch Active Games (last 2 hours)
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      const qGames = query(
+        collection(db, "games"), 
+        where("updatedAt", ">", Timestamp.fromDate(twoHoursAgo))
+      );
+      const unsubGames = onSnapshot(qGames, (snap) => {
+        const activeGames = snap.docs.filter(d => d.data().status !== "ended");
+        setActiveGamesCount(activeGames.length);
+      }, (err) => handleFirestoreError(err, OperationType.LIST, "games"));
+
+      return () => {
+        unsubUsers();
+        unsubGames();
+      };
     }, []);
 
     const toggleSubscription = async (targetUser: UserProfile) => {
@@ -1264,8 +1284,19 @@ function HostView({ user, userProfile, onExit, onJoinGame, showNotification }: {
           updatedAt: serverTimestamp()
         });
         showNotification(`Subscription updated for user`, "success");
+        setConfirmingUser(null);
       } catch (err) {
         handleFirestoreError(err, OperationType.UPDATE, `users/${targetUser.uid}`);
+      }
+    };
+
+    const handleDeleteUser = async (targetUser: UserProfile) => {
+      try {
+        await deleteDoc(doc(db, "users", targetUser.uid));
+        showNotification(`User deleted successfully`, "success");
+        setDeletingUser(null);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.DELETE, `users/${targetUser.uid}`);
       }
     };
 
@@ -1289,16 +1320,40 @@ function HostView({ user, userProfile, onExit, onJoinGame, showNotification }: {
             <div className="w-12" />
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-            <div className="bg-white/10 p-6 rounded-3xl border border-white/10 backdrop-blur-md">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
+            <div className="bg-white/10 p-6 rounded-3xl border border-white/10 backdrop-blur-md relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <Users size={48} />
+              </div>
               <p className="text-indigo-300 font-black uppercase text-[10px] mb-1">Total Users</p>
               <p className="text-4xl font-black">{allUsers.length}</p>
             </div>
-            <div className="bg-white/10 p-6 rounded-3xl border border-white/10 backdrop-blur-md">
+            <div className="bg-white/10 p-6 rounded-3xl border border-white/10 backdrop-blur-md relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <Activity size={48} />
+              </div>
+              <p className="text-indigo-300 font-black uppercase text-[10px] mb-1">Live Games (Last 2h)</p>
+              <div className="flex items-center gap-3">
+                <p className="text-4xl font-black text-green-400">{activeGamesCount}</p>
+                {activeGamesCount > 0 && (
+                  <span className="flex h-3 w-3 relative">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="bg-white/10 p-6 rounded-3xl border border-white/10 backdrop-blur-md relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <Shield size={48} />
+              </div>
               <p className="text-indigo-300 font-black uppercase text-[10px] mb-1">Premium Users</p>
               <p className="text-4xl font-black text-yellow-400">{allUsers.filter(u => u.isPremium).length}</p>
             </div>
-            <div className="bg-white/10 p-6 rounded-3xl border border-white/10 backdrop-blur-md">
+            <div className="bg-white/10 p-6 rounded-3xl border border-white/10 backdrop-blur-md relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <UserIcon size={48} />
+              </div>
               <p className="text-indigo-300 font-black uppercase text-[10px] mb-1">Free Users</p>
               <p className="text-4xl font-black opacity-60">{allUsers.filter(u => !u.isPremium).length}</p>
             </div>
@@ -1328,7 +1383,17 @@ function HostView({ user, userProfile, onExit, onJoinGame, showNotification }: {
                           </div>
                         )}
                         <div className="flex flex-col">
-                          <span className="font-bold text-sm">{u.displayName || "Anonymous User"}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-sm">
+                              {u.displayName || (u.email ? u.email.split('@')[0] : "Anonymous User")}
+                            </span>
+                            {u.updatedAt && (Date.now() - u.updatedAt.toMillis() < 300000) && (
+                              <span className="flex h-2 w-2 relative" title="Online Now">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                              </span>
+                            )}
+                          </div>
                           <span className="text-xs opacity-60">{u.email || "No Email"}</span>
                           <span className="font-mono text-[10px] opacity-30">{u.uid}</span>
                         </div>
@@ -1351,12 +1416,21 @@ function HostView({ user, userProfile, onExit, onJoinGame, showNotification }: {
                       {u.updatedAt?.toDate().toLocaleString() || "N/A"}
                     </td>
                     <td className="p-6">
-                      <button 
-                        onClick={() => toggleSubscription(u)}
-                        className={`px-4 py-2 rounded-xl font-black text-xs uppercase transition-all ${u.isPremium ? "bg-red-500/20 text-red-400 hover:bg-red-500/30" : "bg-green-500/20 text-green-400 hover:bg-green-500/30"}`}
-                      >
-                        {u.isPremium ? "Revoke Premium" : "Grant Premium"}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => setConfirmingUser(u)}
+                          className={`px-4 py-2 rounded-xl font-black text-xs uppercase transition-all ${u.isPremium ? "bg-red-500/20 text-red-400 hover:bg-red-500/30" : "bg-green-500/20 text-green-400 hover:bg-green-500/30"}`}
+                        >
+                          {u.isPremium ? "Revoke Premium" : "Grant Premium"}
+                        </button>
+                        <button 
+                          onClick={() => setDeletingUser(u)}
+                          className="p-2 bg-red-500/10 text-red-400 rounded-xl hover:bg-red-500/20 transition-all"
+                          title="Delete User"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -1364,6 +1438,92 @@ function HostView({ user, userProfile, onExit, onJoinGame, showNotification }: {
             </table>
           </div>
         </div>
+
+        <AnimatePresence>
+          {confirmingUser && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-6"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.9, y: 20 }}
+                className="bg-indigo-900 border border-white/20 p-8 rounded-3xl max-w-md w-full shadow-2xl"
+              >
+                <div className="flex flex-col items-center text-center">
+                  <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-6 ${confirmingUser.isPremium ? "bg-red-500/20 text-red-400" : "bg-green-500/20 text-green-400"}`}>
+                    <Shield size={32} />
+                  </div>
+                  <h3 className="text-2xl font-black mb-2 uppercase tracking-tight">
+                    {confirmingUser.isPremium ? "Revoke Premium?" : "Grant Premium?"}
+                  </h3>
+                  <p className="opacity-60 text-sm mb-8">
+                    Are you sure you want to {confirmingUser.isPremium ? "revoke" : "grant"} premium access for <b>{confirmingUser.displayName || (confirmingUser.email ? confirmingUser.email.split('@')[0] : "this user")}</b>?
+                  </p>
+                  <div className="flex gap-4 w-full">
+                    <button 
+                      onClick={() => setConfirmingUser(null)}
+                      className="flex-1 py-4 bg-white/10 hover:bg-white/20 rounded-2xl font-black text-xs uppercase transition-all"
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      onClick={() => toggleSubscription(confirmingUser)}
+                      className={`flex-1 py-4 rounded-2xl font-black text-xs uppercase transition-all shadow-lg ${confirmingUser.isPremium ? "bg-red-600 hover:bg-red-500" : "bg-green-600 hover:bg-green-500"}`}
+                    >
+                      Yes, Proceed
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+
+          {deletingUser && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-6"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.9, y: 20 }}
+                className="bg-indigo-900 border border-white/20 p-8 rounded-3xl max-w-md w-full shadow-2xl"
+              >
+                <div className="flex flex-col items-center text-center">
+                  <div className="w-16 h-16 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center mb-6">
+                    <Trash2 size={32} />
+                  </div>
+                  <h3 className="text-2xl font-black mb-2 uppercase tracking-tight text-red-400">
+                    Delete User?
+                  </h3>
+                  <p className="opacity-60 text-sm mb-8">
+                    Are you sure you want to permanently delete <b>{deletingUser.displayName || (deletingUser.email ? deletingUser.email.split('@')[0] : "this user")}</b>? This action cannot be undone.
+                  </p>
+                  <div className="flex gap-4 w-full">
+                    <button 
+                      onClick={() => setDeletingUser(null)}
+                      className="flex-1 py-4 bg-white/10 hover:bg-white/20 rounded-2xl font-black text-xs uppercase transition-all"
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      onClick={() => handleDeleteUser(deletingUser)}
+                      className="flex-1 py-4 bg-red-600 hover:bg-red-500 rounded-2xl font-black text-xs uppercase transition-all shadow-lg shadow-red-900/40"
+                    >
+                      Delete User
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     );
   };

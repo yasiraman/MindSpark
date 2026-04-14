@@ -63,6 +63,7 @@ service cloud.firestore {
              data.totalQuestions is number &&
              data.questions is list &&
              (data.createdAt is timestamp || data.createdAt == request.time) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp || data.updatedAt == request.time) &&
              (!('branding' in data) || data.branding == null || data.branding is map);
     }
 
@@ -117,6 +118,7 @@ service cloud.firestore {
       allow create: if isOwner(uid) && isValidUser(request.resource.data);
       allow update: if (isOwner(uid) || isAdmin()) && isValidUser(request.resource.data) && 
                       (request.resource.data.isPremium == resource.data.isPremium || isAdmin());
+      allow delete: if isAdmin();
     }
 
     match /gameSummaries/{summaryId} {
