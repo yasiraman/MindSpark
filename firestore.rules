@@ -81,6 +81,7 @@ service cloud.firestore {
     function isValidUser(data) {
       return data.uid is string &&
              data.isPremium is bool &&
+             (!('premiumSource' in data) || data.premiumSource in ['purchase', 'admin']) &&
              (!('branding' in data) || data.branding is map) &&
              (!('tourStatus' in data) || data.tourStatus is map) &&
              (!('updatedAt' in data) || data.updatedAt is timestamp || data.updatedAt == request.time);
@@ -103,9 +104,10 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{uid} {
-      allow read: if isOwner(uid);
+      allow read: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
       allow create: if isOwner(uid) && isValidUser(request.resource.data);
-      allow update: if isOwner(uid) && isValidUser(request.resource.data) && 
+      allow update: if (isOwner(uid) || isAdmin()) && isValidUser(request.resource.data) && 
                       (request.resource.data.isPremium == resource.data.isPremium || isAdmin());
     }
 

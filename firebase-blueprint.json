@@ -61,6 +61,7 @@
       "properties": {
         "uid": { "type": "string", "description": "User ID." },
         "isPremium": { "type": "boolean", "description": "Whether the user has a premium subscription." },
+        "premiumSource": { "type": "string", "enum": ["purchase", "admin"], "description": "Source of the premium subscription." },
         "branding": {
           "type": "object",
           "properties": {

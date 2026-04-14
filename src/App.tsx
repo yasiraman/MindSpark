@@ -41,7 +41,8 @@ import {
   BarChart3,
   HelpCircle,
   ArrowRight,
-  Gamepad2
+  Gamepad2,
+  Shield
 } from "lucide-react";
 import confetti from "canvas-confetti";
 import { motion, AnimatePresence } from "framer-motion";
@@ -97,6 +98,7 @@ interface Quiz {
 interface UserProfile {
   uid: string;
   isPremium: boolean;
+  premiumSource?: "purchase" | "admin";
   branding?: {
     logoUrl?: string;
     primaryColor?: string;
@@ -521,7 +523,7 @@ function HostView({ user, userProfile, onExit, onJoinGame, showNotification }: {
 }) {
   const [game, setGame] = useState<GameState | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
-  const [hostMode, setHostMode] = useState<"dashboard" | "creator" | "game" | "pricing" | "payment" | "branding" | "analytics">("dashboard");
+  const [hostMode, setHostMode] = useState<"dashboard" | "creator" | "game" | "pricing" | "payment" | "branding" | "analytics" | "admin">("dashboard");
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [editingQuiz, setEditingQuiz] = useState<Quiz | null>(null);
   const [customQuestions, setCustomQuestions] = useState<Question[]>(DEFAULT_QUESTIONS);
@@ -1212,7 +1214,102 @@ function HostView({ user, userProfile, onExit, onJoinGame, showNotification }: {
     );
   };
 
-  // --- FEATURE TOUR ---
+  // --- ADMIN DASHBOARD ---
+  const AdminDashboard = () => {
+    const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+      const q = query(collection(db, "users"), orderBy("updatedAt", "desc"));
+      const unsubscribe = onSnapshot(q, (snap) => {
+        setAllUsers(snap.docs.map(d => d.data() as UserProfile));
+        setLoading(false);
+      }, (err) => handleFirestoreError(err, OperationType.LIST, "users"));
+      return () => unsubscribe();
+    }, []);
+
+    const toggleSubscription = async (targetUser: UserProfile) => {
+      try {
+        const userRef = doc(db, "users", targetUser.uid);
+        await updateDoc(userRef, {
+          isPremium: !targetUser.isPremium,
+          premiumSource: !targetUser.isPremium ? "admin" : deleteField(),
+          updatedAt: serverTimestamp()
+        });
+        showNotification(`Subscription updated for user`, "success");
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `users/${targetUser.uid}`);
+      }
+    };
+
+    if (loading) return (
+      <div className="min-h-screen bg-indigo-900 flex flex-col items-center justify-center text-white">
+        <Loader2 className="animate-spin mb-4" size={48} />
+        <p className="font-black tracking-widest uppercase text-sm opacity-50">Loading Admin Dashboard...</p>
+      </div>
+    );
+
+    return (
+      <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center">
+        <div className="w-full max-w-6xl">
+          <div className="flex justify-between items-center mb-12">
+            <button onClick={() => setHostMode("dashboard")} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all">
+              <ChevronRight size={24} className="rotate-180" />
+            </button>
+            <h2 className="text-4xl font-black tracking-tighter flex items-center gap-4">
+              <Shield className="text-indigo-400" size={40} /> ADMIN DASHBOARD
+            </h2>
+            <div className="w-12" />
+          </div>
+
+          <div className="bg-white/10 rounded-3xl border border-white/10 overflow-hidden backdrop-blur-md">
+            <table className="w-full text-left">
+              <thead className="bg-white/5">
+                <tr>
+                  <th className="p-6 font-black uppercase text-xs text-indigo-300">User UID</th>
+                  <th className="p-6 font-black uppercase text-xs text-indigo-300">Status</th>
+                  <th className="p-6 font-black uppercase text-xs text-indigo-300">Source</th>
+                  <th className="p-6 font-black uppercase text-xs text-indigo-300">Last Seen</th>
+                  <th className="p-6 font-black uppercase text-xs text-indigo-300">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {allUsers.map(u => (
+                  <tr key={u.uid} className="hover:bg-white/5 transition-all">
+                    <td className="p-6 font-mono text-xs opacity-60">{u.uid}</td>
+                    <td className="p-6">
+                      <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${u.isPremium ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30" : "bg-white/10 text-white/40"}`}>
+                        {u.isPremium ? "Premium" : "Free"}
+                      </span>
+                    </td>
+                    <td className="p-6">
+                      {u.isPremium && (
+                        <span className="text-xs font-bold opacity-60 flex items-center gap-1">
+                          {u.premiumSource === "admin" ? <Shield size={12} /> : <Trophy size={12} />}
+                          {u.premiumSource === "admin" ? "Granted by Admin" : "Purchased"}
+                        </span>
+                      )}
+                    </td>
+                    <td className="p-6 text-xs opacity-50">
+                      {u.updatedAt?.toDate().toLocaleString() || "N/A"}
+                    </td>
+                    <td className="p-6">
+                      <button 
+                        onClick={() => toggleSubscription(u)}
+                        className={`px-4 py-2 rounded-xl font-black text-xs uppercase transition-all ${u.isPremium ? "bg-red-500/20 text-red-400 hover:bg-red-500/30" : "bg-green-500/20 text-green-400 hover:bg-green-500/30"}`}
+                      >
+                        {u.isPremium ? "Revoke Premium" : "Grant Premium"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
   const FeatureTour = () => {
     const [run, setRun] = useState(false);
 
@@ -1282,6 +1379,10 @@ function HostView({ user, userProfile, onExit, onJoinGame, showNotification }: {
 
   if (hostMode === "analytics") {
     return <AnalyticsView />;
+  }
+
+  if (hostMode === "admin") {
+    return <AdminDashboard />;
   }
 
   if (hostMode === "branding") {
@@ -1385,6 +1486,16 @@ function HostView({ user, userProfile, onExit, onJoinGame, showNotification }: {
           <div className="flex justify-between items-center mb-8">
             <h1 className="text-4xl font-black tracking-tighter">HOST DASHBOARD</h1>
             <div className="flex gap-4">
+              {user.email === "yasiraman20@gmail.com" && (
+                <button 
+                  onClick={() => setHostMode("admin")}
+                  className="px-4 py-3 bg-indigo-500/20 text-indigo-400 rounded-xl hover:bg-indigo-500/30 transition-all flex items-center gap-2 border border-indigo-500/30"
+                  title="Admin Dashboard"
+                >
+                  <Shield size={20} />
+                  <span className="font-black text-xs uppercase tracking-widest">Admin</span>
+                </button>
+              )}
               {isPremium && (
                 <>
                   <button 
