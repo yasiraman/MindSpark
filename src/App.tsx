@@ -967,7 +967,42 @@ function HostView({ user, userProfile, onExit, showNotification }: {
       return () => unsubscribe();
     }, [user.uid]);
 
-    if (loading) return <div className="flex-1 flex items-center justify-center"><Loader2 className="animate-spin" /></div>;
+    if (loading) return (
+      <div className="min-h-screen bg-indigo-900 flex flex-col items-center justify-center text-white">
+        <Loader2 className="animate-spin mb-4" size={48} />
+        <p className="font-black tracking-widest uppercase text-sm opacity-50">Loading Analytics...</p>
+      </div>
+    );
+
+    if (summaries.length === 0) {
+      return (
+        <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center">
+          <div className="w-full max-w-6xl">
+            <div className="flex justify-between items-center mb-12">
+              <button onClick={() => setHostMode("dashboard")} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all">
+                <ChevronRight size={24} className="rotate-180" />
+              </button>
+              <h2 className="text-4xl font-black tracking-tighter">ADVANCED ANALYTICS</h2>
+              <div className="w-12" />
+            </div>
+            
+            <div className="flex flex-col items-center justify-center py-32 bg-white/5 rounded-3xl border border-white/10 border-dashed">
+              <BarChart3 size={64} className="text-indigo-400 mb-6 opacity-20" />
+              <h3 className="text-2xl font-black mb-2 uppercase tracking-tighter">No Data Yet</h3>
+              <p className="text-indigo-200 opacity-60 max-w-md text-center">
+                Host your first quiz to see advanced analytics and player performance charts here!
+              </p>
+              <button 
+                onClick={() => setHostMode("dashboard")}
+                className="mt-8 px-8 py-4 bg-indigo-600 rounded-2xl font-black hover:scale-105 transition-all"
+              >
+                GO TO DASHBOARD
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center">
