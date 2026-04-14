@@ -23,14 +23,6 @@
 //   - isCorrect: bool (optional)
 //   - joinedAt: timestamp (required)
 //
-// Collection: users
-// Document ID: {uid}
-// Fields:
-//   - uid: string (required)
-//   - email: string (optional)
-//   - plan: string (required, ['free', 'premium'])
-//   - quizCount: number (required, >= 0)
-//
 // ===============================================================
 
 rules_version = '2';
@@ -53,15 +45,6 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == get(/databases/$(database)/documents/games/$(pin)).data.hostId;
     }
 
-    function getUserData(uid) {
-      return get(/databases/$(database)/documents/users/$(uid)).data;
-    }
-
-    function canCreateQuiz(uid) {
-      let userData = getUserData(uid);
-      return userData.plan == 'premium' || userData.quizCount < 3;
-    }
-
     function isValidGame(data) {
       return data.pin is string && data.pin.size() == 6 &&
              data.status in ['lobby', 'playing', 'results', 'ended'] &&
@@ -70,12 +53,6 @@ service cloud.firestore {
              data.totalQuestions is number &&
              data.questions is list &&
              data.createdAt is timestamp;
-    }
-
-    function isValidUser(data) {
-      return data.uid is string &&
-             data.plan in ['free', 'premium'] &&
-             data.quizCount is number && data.quizCount >= 0;
     }
 
     function isValidPlayer(data) {
@@ -91,29 +68,14 @@ service cloud.firestore {
     // Rules
     // ===============================================================
 
-    match /users/{uid} {
-      allow read: if isOwner(uid);
-      
-      // Users can only be created by themselves, default to free plan
-      allow create: if isOwner(uid) && 
-                      isValidUser(request.resource.data) &&
-                      request.resource.data.plan == 'free' &&
-                      request.resource.data.quizCount == 0;
-      
-      // Users can only update their own plan (simulated upgrade) or quizCount (via batch)
-      allow update: if isOwner(uid) && isValidUser(request.resource.data);
-    }
-
     match /games/{pin} {
       // Anyone authenticated can read a game (to join or watch)
       allow read: if isAuthenticated();
       
       // Only authenticated users can create a game, and they must be the host
-      // and they must be within their plan limits
       allow create: if isAuthenticated() && 
                       isValidGame(request.resource.data) && 
-                      request.resource.data.hostId == request.auth.uid &&
-                      canCreateQuiz(request.auth.uid);
+                      request.resource.data.hostId == request.auth.uid;
       
       // Only the host can update the game state
       allow update: if isHost(pin) && 

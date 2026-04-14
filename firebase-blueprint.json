@@ -35,25 +35,9 @@
         "joinedAt": { "type": "string", "format": "date-time", "description": "When the player joined the game." }
       },
       "required": ["id", "name", "score", "joinedAt"]
-    },
-    "User": {
-      "title": "User",
-      "description": "Represents a user's profile and plan status.",
-      "type": "object",
-      "properties": {
-        "uid": { "type": "string", "description": "Firebase Auth UID." },
-        "email": { "type": "string", "description": "User email." },
-        "plan": { "type": "string", "enum": ["free", "premium"], "description": "Subscription plan." },
-        "quizCount": { "type": "number", "description": "Number of quizzes created." }
-      },
-      "required": ["uid", "plan"]
     }
   },
   "firestore": {
-    "/users/{uid}": {
-      "schema": "User",
-      "description": "User profile document."
-    },
     "/games/{pin}": {
       "schema": "Game",
       "description": "Main game document."
