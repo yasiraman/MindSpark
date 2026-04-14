@@ -471,24 +471,31 @@ function HostView({ user, userProfile, onExit, showNotification }: {
 }) {
   const [game, setGame] = useState<GameState | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
-  const [hostMode, setHostMode] = useState<"dashboard" | "creator" | "game">("dashboard");
+  const [hostMode, setHostMode] = useState<"dashboard" | "creator" | "game" | "pricing" | "payment">("dashboard");
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [editingQuiz, setEditingQuiz] = useState<Quiz | null>(null);
   const [customQuestions, setCustomQuestions] = useState<Question[]>(DEFAULT_QUESTIONS);
   const [quizTitle, setQuizTitle] = useState("");
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
   const FREE_QUIZ_LIMIT = 3;
   const isPremium = userProfile?.isPremium || false;
   const quizCount = quizzes.length;
   const canCreateMore = isPremium || quizCount < FREE_QUIZ_LIMIT;
 
-  const handleUpgrade = async () => {
+  const handleCompletePayment = async () => {
     if (!user) return;
+    setIsProcessingPayment(true);
+    // Simulate payment delay
+    await new Promise(resolve => setTimeout(resolve, 2000));
     try {
       await updateDoc(doc(db, "users", user.uid), { isPremium: true, updatedAt: serverTimestamp() });
-      showNotification("Welcome to Premium! You now have unlimited quizzes.", "success");
+      showNotification("Payment successful! Welcome to Premium.", "success");
+      setHostMode("dashboard");
     } catch (err) {
-      showNotification("Upgrade failed", "error");
+      showNotification("Payment failed. Please try again.", "error");
+    } finally {
+      setIsProcessingPayment(false);
     }
   };
 
@@ -690,6 +697,147 @@ function HostView({ user, userProfile, onExit, showNotification }: {
     return () => unsubscribe();
   }, [game?.pin]);
 
+  if (hostMode === "pricing") {
+    return (
+      <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center justify-center">
+        <div className="w-full max-w-4xl text-center">
+          <button 
+            onClick={() => setHostMode("dashboard")}
+            className="absolute top-8 left-8 p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all"
+          >
+            <ChevronRight size={24} className="rotate-180" />
+          </button>
+          
+          <h2 className="text-5xl font-black mb-4 tracking-tighter">CHOOSE YOUR PLAN</h2>
+          <p className="text-indigo-200 text-xl mb-12">Unlock the full power of MindSpark</p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            {/* Free Plan */}
+            <div className="bg-white/5 p-8 rounded-3xl border border-white/10 flex flex-col">
+              <h3 className="text-2xl font-black mb-2">FREE</h3>
+              <p className="text-4xl font-black mb-6">$0<span className="text-lg opacity-50">/mo</span></p>
+              <ul className="text-left space-y-4 mb-8 flex-1">
+                <li className="flex items-center gap-2 opacity-60"><CheckCircle2 size={18} className="text-green-400" /> Up to 3 Quizzes</li>
+                <li className="flex items-center gap-2 opacity-60"><CheckCircle2 size={18} className="text-green-400" /> Real-time Multiplayer</li>
+                <li className="flex items-center gap-2 opacity-60"><CheckCircle2 size={18} className="text-green-400" /> Basic Dashboard</li>
+                <li className="flex items-center gap-2 opacity-30"><XCircle size={18} /> Unlimited Quizzes</li>
+                <li className="flex items-center gap-2 opacity-30"><XCircle size={18} /> Priority Support</li>
+              </ul>
+              <button disabled className="w-full py-4 bg-white/10 rounded-2xl font-black opacity-50 cursor-not-allowed">
+                CURRENT PLAN
+              </button>
+            </div>
+
+            {/* Premium Plan */}
+            <div className="bg-indigo-600 p-8 rounded-3xl border-4 border-yellow-400 flex flex-col relative transform scale-105 shadow-2xl">
+              <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-yellow-400 text-indigo-900 px-4 py-1 rounded-full text-xs font-black uppercase">
+                Recommended
+              </div>
+              <h3 className="text-2xl font-black mb-2">PREMIUM</h3>
+              <p className="text-4xl font-black mb-6">$9.99<span className="text-lg opacity-50">/mo</span></p>
+              <ul className="text-left space-y-4 mb-8 flex-1">
+                <li className="flex items-center gap-2"><CheckCircle2 size={18} className="text-yellow-400" /> Unlimited Quizzes</li>
+                <li className="flex items-center gap-2"><CheckCircle2 size={18} className="text-yellow-400" /> Real-time Multiplayer</li>
+                <li className="flex items-center gap-2"><CheckCircle2 size={18} className="text-yellow-400" /> Advanced Dashboard</li>
+                <li className="flex items-center gap-2"><CheckCircle2 size={18} className="text-yellow-400" /> Custom Branding</li>
+                <li className="flex items-center gap-2"><CheckCircle2 size={18} className="text-yellow-400" /> Priority Support</li>
+              </ul>
+              <button 
+                onClick={() => setHostMode("payment")}
+                className="w-full py-4 bg-yellow-400 text-indigo-900 rounded-2xl font-black shadow-xl hover:scale-105 transition-all"
+              >
+                GET PREMIUM
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (hostMode === "payment") {
+    return (
+      <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center justify-center">
+        <motion.div 
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="w-full max-w-md bg-white rounded-3xl p-8 text-indigo-900 shadow-2xl"
+        >
+          <div className="flex justify-between items-center mb-8">
+            <h2 className="text-3xl font-black tracking-tighter">PAYMENT</h2>
+            <button onClick={() => setHostMode("pricing")} className="text-gray-400 hover:text-indigo-600">
+              <XCircle size={24} />
+            </button>
+          </div>
+
+          <div className="space-y-6">
+            <div className="bg-indigo-50 p-4 rounded-2xl flex justify-between items-center">
+              <div>
+                <p className="text-xs font-bold text-indigo-400 uppercase">Selected Plan</p>
+                <p className="text-lg font-black">MindSpark Premium</p>
+              </div>
+              <p className="text-xl font-black">$9.99</p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-black uppercase text-gray-400 mb-1 block">Card Number</label>
+                <div className="relative">
+                  <input 
+                    type="text" 
+                    placeholder="0000 0000 0000 0000" 
+                    className="w-full p-4 bg-gray-100 rounded-xl font-bold outline-none border-2 border-transparent focus:border-indigo-600 transition-all"
+                  />
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 flex gap-1">
+                    <div className="w-8 h-5 bg-gray-300 rounded" />
+                    <div className="w-8 h-5 bg-gray-300 rounded" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-black uppercase text-gray-400 mb-1 block">Expiry</label>
+                  <input 
+                    type="text" 
+                    placeholder="MM/YY" 
+                    className="w-full p-4 bg-gray-100 rounded-xl font-bold outline-none border-2 border-transparent focus:border-indigo-600 transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-black uppercase text-gray-400 mb-1 block">CVC</label>
+                  <input 
+                    type="text" 
+                    placeholder="123" 
+                    className="w-full p-4 bg-gray-100 rounded-xl font-bold outline-none border-2 border-transparent focus:border-indigo-600 transition-all"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <button 
+              onClick={handleCompletePayment}
+              disabled={isProcessingPayment}
+              className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-xl shadow-xl hover:scale-105 transition-all disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-3"
+            >
+              {isProcessingPayment ? (
+                <>
+                  <Loader2 className="animate-spin" /> PROCESSING...
+                </>
+              ) : (
+                "PAY $9.99"
+              )}
+            </button>
+
+            <p className="text-center text-xs font-bold text-gray-400">
+              Secure payment powered by MindSpark Pay
+            </p>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
   if (hostMode === "dashboard") {
     return (
       <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center">
@@ -741,7 +889,7 @@ function HostView({ user, userProfile, onExit, showNotification }: {
             )}
             {!isPremium && quizCount >= FREE_QUIZ_LIMIT && (
               <button 
-                onClick={handleUpgrade}
+                onClick={() => setHostMode("pricing")}
                 className="w-full py-4 bg-yellow-500 text-indigo-900 rounded-2xl font-black text-lg shadow-xl hover:scale-105 transition-all flex items-center justify-center gap-2"
               >
                 <Trophy size={24} /> UPGRADE TO PREMIUM
