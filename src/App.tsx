@@ -77,6 +77,11 @@ interface Quiz {
 interface UserProfile {
   uid: string;
   isPremium: boolean;
+  branding?: {
+    logoUrl?: string;
+    primaryColor?: string;
+    secondaryColor?: string;
+  };
   updatedAt?: any;
 }
 
@@ -90,6 +95,11 @@ interface GameState {
   correctAnswer?: number;
   leaderboard?: Player[];
   hostId: string;
+  branding?: {
+    logoUrl?: string;
+    primaryColor?: string;
+    secondaryColor?: string;
+  };
 }
 
 enum OperationType {
@@ -471,12 +481,25 @@ function HostView({ user, userProfile, onExit, showNotification }: {
 }) {
   const [game, setGame] = useState<GameState | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
-  const [hostMode, setHostMode] = useState<"dashboard" | "creator" | "game" | "pricing" | "payment">("dashboard");
+  const [hostMode, setHostMode] = useState<"dashboard" | "creator" | "game" | "pricing" | "payment" | "branding">("dashboard");
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [editingQuiz, setEditingQuiz] = useState<Quiz | null>(null);
   const [customQuestions, setCustomQuestions] = useState<Question[]>(DEFAULT_QUESTIONS);
   const [quizTitle, setQuizTitle] = useState("");
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+
+  // Branding State
+  const [brandLogo, setBrandLogo] = useState(userProfile?.branding?.logoUrl || "");
+  const [brandPrimary, setBrandPrimary] = useState(userProfile?.branding?.primaryColor || "#4f46e5");
+  const [brandSecondary, setBrandSecondary] = useState(userProfile?.branding?.secondaryColor || "#7c3aed");
+
+  useEffect(() => {
+    if (userProfile?.branding) {
+      setBrandLogo(userProfile.branding.logoUrl || "");
+      setBrandPrimary(userProfile.branding.primaryColor || "#4f46e5");
+      setBrandSecondary(userProfile.branding.secondaryColor || "#7c3aed");
+    }
+  }, [userProfile?.branding]);
 
   const FREE_QUIZ_LIMIT = 3;
   const isPremium = userProfile?.isPremium || false;
@@ -512,6 +535,24 @@ function HostView({ user, userProfile, onExit, showNotification }: {
     setHostMode("dashboard");
   };
 
+  const saveBranding = async () => {
+    if (!user) return;
+    try {
+      await updateDoc(doc(db, "users", user.uid), {
+        branding: {
+          logoUrl: brandLogo,
+          primaryColor: brandPrimary,
+          secondaryColor: brandSecondary
+        },
+        updatedAt: serverTimestamp()
+      });
+      showNotification("Branding saved!", "success");
+      setHostMode("dashboard");
+    } catch (err) {
+      showNotification("Failed to save branding", "error");
+    }
+  };
+
   // Fetch Quizzes
   useEffect(() => {
     if (!user) return;
@@ -543,7 +584,12 @@ function HostView({ user, userProfile, onExit, showNotification }: {
       currentQuestionIndex: 0,
       totalQuestions: questions.length,
       createdAt: serverTimestamp(),
-      questions: questions
+      questions: questions,
+      branding: isPremium ? {
+        logoUrl: brandLogo,
+        primaryColor: brandPrimary,
+        secondaryColor: brandSecondary
+      } : null
     };
 
     try {
@@ -838,6 +884,99 @@ function HostView({ user, userProfile, onExit, showNotification }: {
     );
   }
 
+  if (hostMode === "branding") {
+    return (
+      <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center justify-center">
+        <div className="w-full max-w-2xl">
+          <div className="flex justify-between items-center mb-12">
+            <button 
+              onClick={() => setHostMode("dashboard")}
+              className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all"
+            >
+              <ChevronRight size={24} className="rotate-180" />
+            </button>
+            <h2 className="text-4xl font-black tracking-tighter">CUSTOM BRANDING</h2>
+            <div className="w-12" />
+          </div>
+
+          <div className="bg-white/10 p-8 rounded-3xl border border-white/10 backdrop-blur-md space-y-8">
+            <div>
+              <label className="text-xs font-black uppercase text-indigo-300 mb-2 block">Logo URL</label>
+              <input 
+                type="text" 
+                placeholder="https://example.com/logo.png"
+                value={brandLogo}
+                onChange={(e) => setBrandLogo(e.target.value)}
+                className="w-full p-4 bg-white/5 rounded-xl font-bold outline-none border-2 border-transparent focus:border-indigo-500 transition-all"
+              />
+              <p className="mt-2 text-xs opacity-50 italic">Recommended: Square PNG with transparent background</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <label className="text-xs font-black uppercase text-indigo-300 mb-2 block">Primary Color</label>
+                <div className="flex gap-3">
+                  <input 
+                    type="color" 
+                    value={brandPrimary}
+                    onChange={(e) => setBrandPrimary(e.target.value)}
+                    className="w-12 h-12 rounded-lg cursor-pointer bg-transparent border-none"
+                  />
+                  <input 
+                    type="text" 
+                    value={brandPrimary}
+                    onChange={(e) => setBrandPrimary(e.target.value)}
+                    className="flex-1 p-3 bg-white/5 rounded-xl font-mono text-sm outline-none"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-black uppercase text-indigo-300 mb-2 block">Secondary Color</label>
+                <div className="flex gap-3">
+                  <input 
+                    type="color" 
+                    value={brandSecondary}
+                    onChange={(e) => setBrandSecondary(e.target.value)}
+                    className="w-12 h-12 rounded-lg cursor-pointer bg-transparent border-none"
+                  />
+                  <input 
+                    type="text" 
+                    value={brandSecondary}
+                    onChange={(e) => setBrandSecondary(e.target.value)}
+                    className="flex-1 p-3 bg-white/5 rounded-xl font-mono text-sm outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-4">
+              <h4 className="text-xs font-black uppercase text-indigo-300 mb-4">Preview</h4>
+              <div 
+                className="p-6 rounded-2xl flex items-center justify-center gap-4"
+                style={{ background: `linear-gradient(135deg, ${brandPrimary}, ${brandSecondary})` }}
+              >
+                {brandLogo ? (
+                  <img src={brandLogo} alt="Logo" className="w-12 h-12 object-contain" referrerPolicy="no-referrer" />
+                ) : (
+                  <Layout size={32} />
+                )}
+                <div className="h-8 w-1 bg-white/20 rounded-full" />
+                <span className="text-2xl font-black tracking-tighter uppercase">MINDSPARK</span>
+              </div>
+            </div>
+
+            <button 
+              onClick={saveBranding}
+              className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-xl shadow-xl hover:scale-105 transition-all flex items-center justify-center gap-3"
+            >
+              <Save size={24} /> SAVE BRANDING
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (hostMode === "dashboard") {
     return (
       <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center">
@@ -845,6 +984,16 @@ function HostView({ user, userProfile, onExit, showNotification }: {
           <div className="flex justify-between items-center mb-8">
             <h1 className="text-4xl font-black tracking-tighter">HOST DASHBOARD</h1>
             <div className="flex gap-4">
+              {isPremium && (
+                <button 
+                  onClick={() => setHostMode("branding")}
+                  className="px-4 py-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all flex items-center gap-2 border border-yellow-500/30"
+                  title="Custom Branding"
+                >
+                  <Settings size={20} className="text-yellow-400" />
+                  <span className="font-black text-xs uppercase tracking-widest text-yellow-400">Branding</span>
+                </button>
+              )}
               <button 
                 onClick={() => {
                   if (!canCreateMore) {
