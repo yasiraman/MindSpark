@@ -72,9 +72,20 @@ service cloud.firestore {
              data.createdAt is timestamp;
     }
 
+    function isValidUser(data) {
+      return data.uid is string &&
+             data.isPremium is bool;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
+
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) && isValidUser(request.resource.data);
+      allow update: if isOwner(uid) && isValidUser(request.resource.data);
+    }
 
     match /quizzes/{quizId} {
       // Users can only see their own quizzes

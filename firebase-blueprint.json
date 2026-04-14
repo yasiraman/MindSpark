@@ -49,6 +49,17 @@
         "createdAt": { "type": "string", "format": "date-time", "description": "When the quiz was created." }
       },
       "required": ["id", "title", "hostId", "questions", "createdAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile and subscription data.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "User ID." },
+        "isPremium": { "type": "boolean", "description": "Whether the user has a premium subscription." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update timestamp." }
+      },
+      "required": ["uid", "isPremium"]
     }
   },
   "firestore": {
@@ -63,6 +74,10 @@
     "/quizzes/{quizId}": {
       "schema": "Quiz",
       "description": "Collection of saved quizzes."
+    },
+    "/users/{uid}": {
+      "schema": "UserProfile",
+      "description": "User profile data."
     }
   }
 }

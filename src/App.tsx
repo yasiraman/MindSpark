@@ -74,6 +74,12 @@ interface Quiz {
   createdAt: any;
 }
 
+interface UserProfile {
+  uid: string;
+  isPremium: boolean;
+  updatedAt?: any;
+}
+
 interface GameState {
   pin: string;
   status: "lobby" | "playing" | "results" | "ended";
@@ -269,6 +275,7 @@ export default function App() {
 
 function MainApp() {
   const [user, setUser] = useState<any>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [view, setView] = useState<"landing" | "host" | "player">("landing");
   const [notification, setNotification] = useState<{ message: string; type: "error" | "info" | "success" } | null>(null);
@@ -290,6 +297,24 @@ function MainApp() {
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setUserProfile(null);
+      return;
+    }
+    const unsubscribe = onSnapshot(doc(db, "users", user.uid), (snap) => {
+      if (snap.exists()) {
+        setUserProfile(snap.data() as UserProfile);
+      } else {
+        // Create initial profile
+        const initialProfile = { uid: user.uid, isPremium: false };
+        setDoc(doc(db, "users", user.uid), initialProfile);
+        setUserProfile(initialProfile);
+      }
+    });
+    return () => unsubscribe();
+  }, [user?.uid]);
 
   const showNotification = (message: string, type: "error" | "info" | "success" = "info") => {
     setNotification({ message, type });
@@ -414,7 +439,12 @@ function MainApp() {
   return (
     <div className="min-h-screen bg-gray-100">
       {view === "host" ? (
-        <HostView user={user} onExit={() => setView("landing")} showNotification={showNotification} />
+        <HostView 
+          user={user} 
+          userProfile={userProfile}
+          onExit={() => setView("landing")} 
+          showNotification={showNotification} 
+        />
       ) : (
         <PlayerView user={user} onExit={() => setView("landing")} showNotification={showNotification} />
       )}
@@ -433,8 +463,9 @@ function MainApp() {
 }
 
 // --- HOST VIEW ---
-function HostView({ user, onExit, showNotification }: { 
+function HostView({ user, userProfile, onExit, showNotification }: { 
   user: any, 
+  userProfile: UserProfile | null,
   onExit: () => void,
   showNotification: (m: string, t?: "error" | "info" | "success") => void 
 }) {
@@ -445,6 +476,21 @@ function HostView({ user, onExit, showNotification }: {
   const [editingQuiz, setEditingQuiz] = useState<Quiz | null>(null);
   const [customQuestions, setCustomQuestions] = useState<Question[]>(DEFAULT_QUESTIONS);
   const [quizTitle, setQuizTitle] = useState("");
+
+  const FREE_QUIZ_LIMIT = 3;
+  const isPremium = userProfile?.isPremium || false;
+  const quizCount = quizzes.length;
+  const canCreateMore = isPremium || quizCount < FREE_QUIZ_LIMIT;
+
+  const handleUpgrade = async () => {
+    if (!user) return;
+    try {
+      await updateDoc(doc(db, "users", user.uid), { isPremium: true, updatedAt: serverTimestamp() });
+      showNotification("Welcome to Premium! You now have unlimited quizzes.", "success");
+    } catch (err) {
+      showNotification("Upgrade failed", "error");
+    }
+  };
 
   const handleExit = () => {
     localStorage.removeItem("mindspark_active_pin");
@@ -510,6 +556,11 @@ function HostView({ user, onExit, showNotification }: {
 
   const saveQuiz = async () => {
     if (!quizTitle.trim()) return showNotification("Please enter a quiz title", "error");
+    
+    if (!editingQuiz && !canCreateMore) {
+      return showNotification("Free limit reached! Upgrade to Premium for more quizzes.", "error");
+    }
+
     const quizId = editingQuiz?.id || uuidv4();
     const quizRef = doc(db, "quizzes", quizId);
     
@@ -643,17 +694,20 @@ function HostView({ user, onExit, showNotification }: {
     return (
       <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center">
         <div className="w-full max-w-4xl">
-          <div className="flex justify-between items-center mb-12">
+          <div className="flex justify-between items-center mb-8">
             <h1 className="text-4xl font-black tracking-tighter">HOST DASHBOARD</h1>
             <div className="flex gap-4">
               <button 
                 onClick={() => {
+                  if (!canCreateMore) {
+                    return showNotification("Free limit reached! Upgrade to Premium for more quizzes.", "error");
+                  }
                   setEditingQuiz(null);
                   setQuizTitle("");
                   setCustomQuestions(DEFAULT_QUESTIONS);
                   setHostMode("creator");
                 }}
-                className="px-6 py-3 bg-indigo-600 rounded-xl font-black flex items-center gap-2 hover:scale-105 transition-all"
+                className={`px-6 py-3 rounded-xl font-black flex items-center gap-2 transition-all ${canCreateMore ? "bg-indigo-600 hover:scale-105" : "bg-gray-600 opacity-50 cursor-not-allowed"}`}
               >
                 <Plus size={20} /> NEW QUIZ
               </button>
@@ -661,6 +715,38 @@ function HostView({ user, onExit, showNotification }: {
                 <LogOut size={24} />
               </button>
             </div>
+          </div>
+
+          {/* Quiz Limit Bar */}
+          <div className="bg-white/10 p-6 rounded-3xl border border-white/10 backdrop-blur-md mb-8">
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center gap-2">
+                <Trophy size={20} className={isPremium ? "text-yellow-400" : "text-indigo-300"} />
+                <span className="font-black uppercase tracking-widest text-sm">
+                  {isPremium ? "Premium Account" : "Free Plan"}
+                </span>
+              </div>
+              <span className="font-black text-xl">
+                {isPremium ? quizCount : `${quizCount} / ${FREE_QUIZ_LIMIT}`} Quizzes
+              </span>
+            </div>
+            {!isPremium && (
+              <div className="w-full h-4 bg-white/10 rounded-full overflow-hidden mb-4">
+                <motion.div 
+                  initial={{ width: 0 }}
+                  animate={{ width: `${Math.min((quizCount / FREE_QUIZ_LIMIT) * 100, 100)}%` }}
+                  className={`h-full ${quizCount >= FREE_QUIZ_LIMIT ? "bg-red-500" : "bg-indigo-500"}`}
+                />
+              </div>
+            )}
+            {!isPremium && quizCount >= FREE_QUIZ_LIMIT && (
+              <button 
+                onClick={handleUpgrade}
+                className="w-full py-4 bg-yellow-500 text-indigo-900 rounded-2xl font-black text-lg shadow-xl hover:scale-105 transition-all flex items-center justify-center gap-2"
+              >
+                <Trophy size={24} /> UPGRADE TO PREMIUM
+              </button>
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
