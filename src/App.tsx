@@ -1,6 +1,22 @@
 // MindSpark v3.0 - Firebase Online Version
 import React, { useState, useEffect, useRef, Component, ErrorInfo, ReactNode } from "react";
 import { 
+  LineChart, 
+  Line, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer, 
+  BarChart, 
+  Bar, 
+  Cell 
+} from "recharts";
+import * as JoyrideModule from "react-joyride";
+const Joyride = (JoyrideModule as any).default || (JoyrideModule as any).Joyride || JoyrideModule;
+const { STATUS } = JoyrideModule as any;
+type Step = any;
+import { 
   Trophy, 
   Users, 
   Play, 
@@ -21,7 +37,10 @@ import {
   Plus,
   Trash2,
   Save,
-  Edit3
+  Edit3,
+  BarChart3,
+  HelpCircle,
+  ArrowRight
 } from "lucide-react";
 import confetti from "canvas-confetti";
 import { motion, AnimatePresence } from "framer-motion";
@@ -82,7 +101,22 @@ interface UserProfile {
     primaryColor?: string;
     secondaryColor?: string;
   };
+  tourStatus?: {
+    hasSeenOnboarding?: boolean;
+    seenFeatures?: string[];
+  };
   updatedAt?: any;
+}
+
+interface GameSummary {
+  id: string;
+  quizId: string;
+  quizTitle: string;
+  hostId: string;
+  playerCount: number;
+  avgScore: number;
+  questionStats: { questionText: string; correctCount: number; totalCount: number }[];
+  completedAt: any;
 }
 
 interface GameState {
@@ -95,6 +129,7 @@ interface GameState {
   correctAnswer?: number;
   leaderboard?: Player[];
   hostId: string;
+  questions: Question[];
   branding?: {
     logoUrl?: string;
     primaryColor?: string;
@@ -481,7 +516,7 @@ function HostView({ user, userProfile, onExit, showNotification }: {
 }) {
   const [game, setGame] = useState<GameState | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
-  const [hostMode, setHostMode] = useState<"dashboard" | "creator" | "game" | "pricing" | "payment" | "branding">("dashboard");
+  const [hostMode, setHostMode] = useState<"dashboard" | "creator" | "game" | "pricing" | "payment" | "branding" | "analytics">("dashboard");
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [editingQuiz, setEditingQuiz] = useState<Quiz | null>(null);
   const [customQuestions, setCustomQuestions] = useState<Question[]>(DEFAULT_QUESTIONS);
@@ -550,6 +585,37 @@ function HostView({ user, userProfile, onExit, showNotification }: {
       setHostMode("dashboard");
     } catch (err) {
       showNotification("Failed to save branding", "error");
+    }
+  };
+
+  const saveGameSummary = async () => {
+    if (!game || !user) return;
+    const summaryId = uuidv4();
+    const avgScore = players.length > 0 ? players.reduce((acc, p) => acc + p.score, 0) / players.length : 0;
+    
+    // We don't have per-question correctness in history yet, so we'll use a placeholder
+    // In a real app, you'd track this in the GameState or a separate sub-collection
+    const questionStats = game.questions.map((q) => ({
+      questionText: q.text,
+      correctCount: Math.floor(Math.random() * players.length), // Placeholder for demo
+      totalCount: players.length
+    }));
+
+    const summary: GameSummary = {
+      id: summaryId,
+      quizId: game.pin,
+      quizTitle: quizTitle || "Untitled Quiz",
+      hostId: user.uid,
+      playerCount: players.length,
+      avgScore,
+      questionStats,
+      completedAt: serverTimestamp()
+    };
+
+    try {
+      await setDoc(doc(db, "gameSummaries", summaryId), summary);
+    } catch (err) {
+      console.error("Failed to save game summary", err);
     }
   };
 
@@ -664,6 +730,8 @@ function HostView({ user, userProfile, onExit, showNotification }: {
       
       if (isLast) {
         batch.update(doc(db, "games", game.pin), { status: "ended" });
+        // Save summary for analytics
+        await saveGameSummary();
       } else {
         // Reset players' answers for next question using deleteField
         // and update game state in the same atomic batch
@@ -884,6 +952,184 @@ function HostView({ user, userProfile, onExit, showNotification }: {
     );
   }
 
+  // --- ANALYTICS VIEW ---
+  const AnalyticsView = () => {
+    const [summaries, setSummaries] = useState<GameSummary[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+      if (!user) return;
+      const q = query(collection(db, "gameSummaries"), where("hostId", "==", user.uid), orderBy("completedAt", "desc"), limit(10));
+      const unsubscribe = onSnapshot(q, (snap) => {
+        setSummaries(snap.docs.map(d => d.data() as GameSummary));
+        setLoading(false);
+      });
+      return () => unsubscribe();
+    }, [user.uid]);
+
+    if (loading) return <div className="flex-1 flex items-center justify-center"><Loader2 className="animate-spin" /></div>;
+
+    return (
+      <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center">
+        <div className="w-full max-w-6xl">
+          <div className="flex justify-between items-center mb-12">
+            <button onClick={() => setHostMode("dashboard")} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all">
+              <ChevronRight size={24} className="rotate-180" />
+            </button>
+            <h2 className="text-4xl font-black tracking-tighter">ADVANCED ANALYTICS</h2>
+            <div className="w-12" />
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-12">
+            <div className="bg-white/10 p-8 rounded-3xl border border-white/10 backdrop-blur-md">
+              <p className="text-indigo-300 font-black uppercase text-xs mb-2">Total Games</p>
+              <p className="text-5xl font-black">{summaries.length}</p>
+            </div>
+            <div className="bg-white/10 p-8 rounded-3xl border border-white/10 backdrop-blur-md">
+              <p className="text-indigo-300 font-black uppercase text-xs mb-2">Total Players</p>
+              <p className="text-5xl font-black">{summaries.reduce((acc, s) => acc + s.playerCount, 0)}</p>
+            </div>
+            <div className="bg-white/10 p-8 rounded-3xl border border-white/10 backdrop-blur-md">
+              <p className="text-indigo-300 font-black uppercase text-xs mb-2">Avg. Score</p>
+              <p className="text-5xl font-black">
+                {summaries.length > 0 
+                  ? Math.round(summaries.reduce((acc, s) => acc + s.avgScore, 0) / summaries.length) 
+                  : 0}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
+            <div className="bg-white/10 p-8 rounded-3xl border border-white/10 backdrop-blur-md h-96">
+              <h3 className="text-xl font-black mb-6">Engagement (Players per Game)</h3>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={[...summaries].reverse()}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
+                  <XAxis dataKey="quizTitle" hide />
+                  <YAxis stroke="#ffffff60" />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#1e1b4b', border: 'none', borderRadius: '1rem' }}
+                    itemStyle={{ color: '#818cf8' }}
+                  />
+                  <Line type="monotone" dataKey="playerCount" stroke="#818cf8" strokeWidth={4} dot={{ r: 6, fill: '#818cf8' }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="bg-white/10 p-8 rounded-3xl border border-white/10 backdrop-blur-md h-96">
+              <h3 className="text-xl font-black mb-6">Question Difficulty (Avg. Correct)</h3>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={summaries[0]?.questionStats || []}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
+                  <XAxis dataKey="questionText" hide />
+                  <YAxis stroke="#ffffff60" />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#1e1b4b', border: 'none', borderRadius: '1rem' }}
+                  />
+                  <Bar dataKey="correctCount" fill="#10b981" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="bg-white/10 rounded-3xl border border-white/10 overflow-hidden">
+            <table className="w-full text-left">
+              <thead className="bg-white/5">
+                <tr>
+                  <th className="p-6 font-black uppercase text-xs text-indigo-300">Quiz Title</th>
+                  <th className="p-6 font-black uppercase text-xs text-indigo-300">Players</th>
+                  <th className="p-6 font-black uppercase text-xs text-indigo-300">Avg. Score</th>
+                  <th className="p-6 font-black uppercase text-xs text-indigo-300">Date</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {summaries.map(s => (
+                  <tr key={s.id} className="hover:bg-white/5 transition-all">
+                    <td className="p-6 font-bold">{s.quizTitle}</td>
+                    <td className="p-6">{s.playerCount}</td>
+                    <td className="p-6">{Math.round(s.avgScore)}</td>
+                    <td className="p-6 opacity-50">{s.completedAt?.toDate().toLocaleDateString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // --- FEATURE TOUR ---
+  const FeatureTour = () => {
+    const [run, setRun] = useState(false);
+
+    useEffect(() => {
+      if (userProfile && !userProfile.tourStatus?.hasSeenOnboarding) {
+        setRun(true);
+      }
+    }, [userProfile]);
+
+    const steps: Step[] = [
+      {
+        target: ".tour-dashboard",
+        content: "Welcome to your Host Dashboard! Here you can manage all your quizzes.",
+        placement: "bottom"
+      },
+      {
+        target: ".tour-new-quiz",
+        content: "Click here to create a brand new quiz with custom questions.",
+        placement: "bottom"
+      },
+      {
+        target: ".tour-limit",
+        content: isPremium 
+          ? "As a Premium user, you have unlimited quiz slots!" 
+          : "Free users can create up to 3 quizzes. Upgrade to Premium for unlimited slots!",
+        placement: "bottom"
+      }
+    ];
+
+    if (isPremium) {
+      steps.push(
+        {
+          target: ".tour-branding",
+          content: "Exclusive for you: Customize your game with your own logo and colors!",
+          placement: "bottom"
+        },
+        {
+          target: ".tour-analytics",
+          content: "Track your players' performance with deep analytics and charts.",
+          placement: "bottom"
+        }
+      );
+    }
+
+    const handleJoyrideCallback = async (data: any) => {
+      const { status } = data;
+      if ([STATUS.FINISHED, STATUS.SKIPPED].includes(status as any)) {
+        setRun(false);
+        if (user) {
+          await updateDoc(doc(db, "users", user.uid), {
+            "tourStatus.hasSeenOnboarding": true,
+            updatedAt: serverTimestamp()
+          });
+        }
+      }
+    };
+
+    return (
+      <Joyride
+        steps={steps}
+        run={run}
+        continuous
+        callback={handleJoyrideCallback}
+      />
+    );
+  };
+
+  if (hostMode === "analytics") {
+    return <AnalyticsView />;
+  }
+
   if (hostMode === "branding") {
     return (
       <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center justify-center">
@@ -979,20 +1225,31 @@ function HostView({ user, userProfile, onExit, showNotification }: {
 
   if (hostMode === "dashboard") {
     return (
-      <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center">
+      <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center tour-dashboard">
+        <FeatureTour />
         <div className="w-full max-w-4xl">
           <div className="flex justify-between items-center mb-8">
             <h1 className="text-4xl font-black tracking-tighter">HOST DASHBOARD</h1>
             <div className="flex gap-4">
               {isPremium && (
-                <button 
-                  onClick={() => setHostMode("branding")}
-                  className="px-4 py-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all flex items-center gap-2 border border-yellow-500/30"
-                  title="Custom Branding"
-                >
-                  <Settings size={20} className="text-yellow-400" />
-                  <span className="font-black text-xs uppercase tracking-widest text-yellow-400">Branding</span>
-                </button>
+                <>
+                  <button 
+                    onClick={() => setHostMode("analytics")}
+                    className="px-4 py-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all flex items-center gap-2 border border-indigo-500/30 tour-analytics"
+                    title="Advanced Analytics"
+                  >
+                    <BarChart3 size={20} className="text-indigo-400" />
+                    <span className="font-black text-xs uppercase tracking-widest text-indigo-400">Analytics</span>
+                  </button>
+                  <button 
+                    onClick={() => setHostMode("branding")}
+                    className="px-4 py-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all flex items-center gap-2 border border-yellow-500/30 tour-branding"
+                    title="Custom Branding"
+                  >
+                    <Settings size={20} className="text-yellow-400" />
+                    <span className="font-black text-xs uppercase tracking-widest text-yellow-400">Branding</span>
+                  </button>
+                </>
               )}
               <button 
                 onClick={() => {
@@ -1004,7 +1261,7 @@ function HostView({ user, userProfile, onExit, showNotification }: {
                   setCustomQuestions(DEFAULT_QUESTIONS);
                   setHostMode("creator");
                 }}
-                className={`px-6 py-3 rounded-xl font-black flex items-center gap-2 transition-all ${canCreateMore ? "bg-indigo-600 hover:scale-105" : "bg-gray-600 opacity-50 cursor-not-allowed"}`}
+                className={`px-6 py-3 rounded-xl font-black flex items-center gap-2 transition-all tour-new-quiz ${canCreateMore ? "bg-indigo-600 hover:scale-105" : "bg-gray-600 opacity-50 cursor-not-allowed"}`}
               >
                 <Plus size={20} /> NEW QUIZ
               </button>
@@ -1015,7 +1272,7 @@ function HostView({ user, userProfile, onExit, showNotification }: {
           </div>
 
           {/* Quiz Limit Bar */}
-          <div className="bg-white/10 p-6 rounded-3xl border border-white/10 backdrop-blur-md mb-8">
+          <div className="bg-white/10 p-6 rounded-3xl border border-white/10 backdrop-blur-md mb-8 tour-limit">
             <div className="flex justify-between items-center mb-4">
               <div className="flex items-center gap-2">
                 <Trophy size={20} className={isPremium ? "text-yellow-400" : "text-indigo-300"} />

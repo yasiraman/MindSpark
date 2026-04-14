@@ -64,15 +64,37 @@
         "branding": {
           "type": "object",
           "properties": {
-            "logoUrl": { "type": "string", "description": "URL to custom logo." },
-            "primaryColor": { "type": "string", "description": "Primary brand color (hex)." },
-            "secondaryColor": { "type": "string", "description": "Secondary brand color (hex)." }
-          },
-          "description": "Custom branding settings."
+            "logoUrl": { "type": "string" },
+            "primaryColor": { "type": "string" },
+            "secondaryColor": { "type": "string" }
+          }
+        },
+        "tourStatus": {
+          "type": "object",
+          "properties": {
+            "hasSeenOnboarding": { "type": "boolean" },
+            "seenFeatures": { "type": "array", "items": { "type": "string" } }
+          }
         },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Last update timestamp." }
       },
       "required": ["uid", "isPremium"]
+    },
+    "GameSummary": {
+      "title": "GameSummary",
+      "description": "Historical summary of a completed game for analytics.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "quizId": { "type": "string" },
+        "quizTitle": { "type": "string" },
+        "hostId": { "type": "string" },
+        "playerCount": { "type": "number" },
+        "avgScore": { "type": "number" },
+        "questionStats": { "type": "array" },
+        "completedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "quizId", "hostId", "playerCount", "completedAt"]
     }
   },
   "firestore": {
@@ -91,6 +113,10 @@
     "/users/{uid}": {
       "schema": "UserProfile",
       "description": "User profile data."
+    },
+    "/gameSummaries/{summaryId}": {
+      "schema": "GameSummary",
+      "description": "Historical game data for analytics."
     }
   }
 }

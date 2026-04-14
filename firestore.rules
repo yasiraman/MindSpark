@@ -52,8 +52,7 @@ service cloud.firestore {
              data.currentQuestionIndex is number &&
              data.totalQuestions is number &&
              data.questions is list &&
-             data.createdAt is timestamp &&
-             (!('branding' in data) || data.branding is map);
+             data.createdAt is timestamp;
     }
 
     function isValidPlayer(data) {
@@ -75,8 +74,7 @@ service cloud.firestore {
 
     function isValidUser(data) {
       return data.uid is string &&
-             data.isPremium is bool &&
-             (!('branding' in data) || data.branding is map);
+             data.isPremium is bool;
     }
 
     // ===============================================================
@@ -87,6 +85,13 @@ service cloud.firestore {
       allow read: if isOwner(uid);
       allow create: if isOwner(uid) && isValidUser(request.resource.data);
       allow update: if isOwner(uid) && isValidUser(request.resource.data);
+    }
+
+    match /gameSummaries/{summaryId} {
+      // Users can only see their own game summaries
+      allow read: if isAuthenticated() && resource.data.hostId == request.auth.uid;
+      // Only the host can create a summary for their game
+      allow create: if isAuthenticated() && request.resource.data.hostId == request.auth.uid;
     }
 
     match /quizzes/{quizId} {
