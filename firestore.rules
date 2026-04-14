@@ -45,6 +45,11 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == get(/databases/$(database)/documents/games/$(pin)).data.hostId;
     }
 
+    function isAdmin() {
+      return isAuthenticated() &&
+        (request.auth.token.email == "yasiraman20@gmail.com" && request.auth.token.email_verified == true);
+    }
+
     function isValidGame(data) {
       return data.pin is string && data.pin.size() == 6 &&
              data.status in ['lobby', 'playing', 'results', 'ended'] &&
@@ -52,14 +57,15 @@ service cloud.firestore {
              data.currentQuestionIndex is number &&
              data.totalQuestions is number &&
              data.questions is list &&
-             data.createdAt is timestamp;
+             (data.createdAt is timestamp || data.createdAt == request.time) &&
+             (!('branding' in data) || data.branding == null || data.branding is map);
     }
 
     function isValidPlayer(data) {
       return data.id is string &&
              data.name is string && data.name.size() >= 1 && data.name.size() <= 20 &&
              data.score is number && data.score >= 0 &&
-             data.joinedAt is timestamp &&
+             (data.joinedAt is timestamp || data.joinedAt == request.time) &&
              (!('lastAnswer' in data) || data.lastAnswer is number) &&
              (!('isCorrect' in data) || data.isCorrect is bool);
     }
@@ -69,12 +75,27 @@ service cloud.firestore {
              data.title is string && data.title.size() >= 1 && data.title.size() <= 100 &&
              data.hostId is string &&
              data.questions is list &&
-             data.createdAt is timestamp;
+             (data.createdAt is timestamp || data.createdAt == request.time);
     }
 
     function isValidUser(data) {
       return data.uid is string &&
-             data.isPremium is bool;
+             data.isPremium is bool &&
+             (!('branding' in data) || data.branding is map) &&
+             (!('tourStatus' in data) || data.tourStatus is map) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp || data.updatedAt == request.time);
+    }
+
+    function isValidGameSummary(data) {
+      return data.id is string &&
+             data.quizId is string &&
+             data.quizTitle is string &&
+             data.hostId is string &&
+             data.playerCount is number &&
+             data.avgScore is number &&
+             data.questionStats is list &&
+             data.leaderboard is list &&
+             (data.completedAt is timestamp || data.completedAt == request.time);
     }
 
     // ===============================================================
@@ -84,14 +105,17 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if isOwner(uid);
       allow create: if isOwner(uid) && isValidUser(request.resource.data);
-      allow update: if isOwner(uid) && isValidUser(request.resource.data);
+      allow update: if isOwner(uid) && isValidUser(request.resource.data) && 
+                      (request.resource.data.isPremium == resource.data.isPremium || isAdmin());
     }
 
     match /gameSummaries/{summaryId} {
       // Users can only see their own game summaries
       allow read: if isAuthenticated() && resource.data.hostId == request.auth.uid;
       // Only the host can create a summary for their game
-      allow create: if isAuthenticated() && request.resource.data.hostId == request.auth.uid;
+      allow create: if isAuthenticated() && 
+                      isValidGameSummary(request.resource.data) &&
+                      request.resource.data.hostId == request.auth.uid;
     }
 
     match /quizzes/{quizId} {

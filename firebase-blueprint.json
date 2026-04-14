@@ -92,6 +92,7 @@
         "playerCount": { "type": "number" },
         "avgScore": { "type": "number" },
         "questionStats": { "type": "array" },
+        "leaderboard": { "type": "array" },
         "completedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "quizId", "hostId", "playerCount", "completedAt"]

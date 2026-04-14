@@ -116,6 +116,7 @@ interface GameSummary {
   playerCount: number;
   avgScore: number;
   questionStats: { questionText: string; correctCount: number; totalCount: number }[];
+  leaderboard: Player[];
   completedAt: any;
 }
 
@@ -609,6 +610,7 @@ function HostView({ user, userProfile, onExit, showNotification }: {
       playerCount: players.length,
       avgScore,
       questionStats,
+      leaderboard: [...players].sort((a, b) => b.score - a.score),
       completedAt: serverTimestamp()
     };
 
@@ -956,6 +958,7 @@ function HostView({ user, userProfile, onExit, showNotification }: {
   const AnalyticsView = () => {
     const [summaries, setSummaries] = useState<GameSummary[]>([]);
     const [loading, setLoading] = useState(true);
+    const [selectedSummary, setSelectedSummary] = useState<GameSummary | null>(null);
 
     useEffect(() => {
       if (!user) return;
@@ -1005,7 +1008,97 @@ function HostView({ user, userProfile, onExit, showNotification }: {
     }
 
     return (
-      <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center">
+      <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center relative">
+        <AnimatePresence>
+          {selectedSummary && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+              onClick={() => setSelectedSummary(null)}
+            >
+              <motion.div 
+                initial={{ scale: 0.9, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.9, y: 20 }}
+                className="bg-indigo-950 w-full max-w-2xl rounded-3xl border border-white/10 p-8 overflow-hidden max-h-[90vh] flex flex-col"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="flex justify-between items-center mb-8">
+                  <div>
+                    <h3 className="text-3xl font-black tracking-tighter uppercase">{selectedSummary.quizTitle}</h3>
+                    <p className="text-indigo-300 opacity-60 font-bold">
+                      {selectedSummary.completedAt?.toDate().toLocaleString()}
+                    </p>
+                  </div>
+                  <button 
+                    onClick={() => setSelectedSummary(null)}
+                    className="p-2 bg-white/10 rounded-full hover:bg-white/20 transition-all"
+                  >
+                    <XCircle size={24} />
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto pr-2 space-y-6">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
+                      <p className="text-[10px] font-black uppercase text-indigo-300 mb-1">Total Players</p>
+                      <p className="text-2xl font-black">{selectedSummary.playerCount}</p>
+                    </div>
+                    <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
+                      <p className="text-[10px] font-black uppercase text-indigo-300 mb-1">Average Score</p>
+                      <p className="text-2xl font-black">{Math.round(selectedSummary.avgScore)}</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="text-xs font-black uppercase tracking-widest text-indigo-300 mb-4 flex items-center gap-2">
+                      <Trophy size={14} /> Final Leaderboard
+                    </h4>
+                    <div className="space-y-2">
+                      {selectedSummary.leaderboard?.map((p, idx) => (
+                        <div key={p.id} className="flex items-center justify-between p-4 bg-white/5 rounded-xl border border-white/5">
+                          <div className="flex items-center gap-4">
+                            <span className={`w-8 h-8 flex items-center justify-center rounded-full font-black text-sm ${idx === 0 ? "bg-yellow-500 text-indigo-900" : idx === 1 ? "bg-gray-300 text-indigo-900" : idx === 2 ? "bg-amber-600 text-white" : "bg-white/10 text-white"}`}>
+                              {idx + 1}
+                            </span>
+                            <span className="font-bold">{p.name}</span>
+                          </div>
+                          <span className="font-black text-indigo-400">{p.score} pts</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="text-xs font-black uppercase tracking-widest text-indigo-300 mb-4 flex items-center gap-2">
+                      <BarChart3 size={14} /> Question Stats
+                    </h4>
+                    <div className="space-y-2">
+                      {selectedSummary.questionStats.map((q, idx) => (
+                        <div key={idx} className="p-4 bg-white/5 rounded-xl border border-white/5">
+                          <p className="text-sm font-bold mb-2">{q.questionText}</p>
+                          <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-green-500"
+                              style={{ width: `${(q.correctCount / q.totalCount) * 100}%` }}
+                            />
+                          </div>
+                          <div className="flex justify-between mt-1 text-[10px] font-bold opacity-50">
+                            <span>{q.correctCount} Correct</span>
+                            <span>{q.totalCount} Total</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <div className="w-full max-w-6xl">
           <div className="flex justify-between items-center mb-12">
             <button onClick={() => setHostMode("dashboard")} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all">
@@ -1074,6 +1167,7 @@ function HostView({ user, userProfile, onExit, showNotification }: {
                   <th className="p-6 font-black uppercase text-xs text-indigo-300">Players</th>
                   <th className="p-6 font-black uppercase text-xs text-indigo-300">Avg. Score</th>
                   <th className="p-6 font-black uppercase text-xs text-indigo-300">Date</th>
+                  <th className="p-6 font-black uppercase text-xs text-indigo-300">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
@@ -1083,6 +1177,14 @@ function HostView({ user, userProfile, onExit, showNotification }: {
                     <td className="p-6">{s.playerCount}</td>
                     <td className="p-6">{Math.round(s.avgScore)}</td>
                     <td className="p-6 opacity-50">{s.completedAt?.toDate().toLocaleDateString()}</td>
+                    <td className="p-6">
+                      <button 
+                        onClick={() => setSelectedSummary(s)}
+                        className="flex items-center gap-2 text-indigo-400 font-black text-xs uppercase hover:text-indigo-300 transition-all"
+                      >
+                        View Results <ArrowRight size={14} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
