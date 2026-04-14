@@ -40,7 +40,8 @@ import {
   Edit3,
   BarChart3,
   HelpCircle,
-  ArrowRight
+  ArrowRight,
+  Gamepad2
 } from "lucide-react";
 import confetti from "canvas-confetti";
 import { motion, AnimatePresence } from "framer-motion";
@@ -490,6 +491,7 @@ function MainApp() {
           user={user} 
           userProfile={userProfile}
           onExit={() => setView("landing")} 
+          onJoinGame={() => setView("player")}
           showNotification={showNotification} 
         />
       ) : (
@@ -510,10 +512,11 @@ function MainApp() {
 }
 
 // --- HOST VIEW ---
-function HostView({ user, userProfile, onExit, showNotification }: { 
+function HostView({ user, userProfile, onExit, onJoinGame, showNotification }: { 
   user: any, 
   userProfile: UserProfile | null,
   onExit: () => void,
+  onJoinGame: () => void,
   showNotification: (m: string, t?: "error" | "info" | "success") => void 
 }) {
   const [game, setGame] = useState<GameState | null>(null);
@@ -1403,6 +1406,14 @@ function HostView({ user, userProfile, onExit, showNotification }: {
                 </>
               )}
               <button 
+                onClick={onJoinGame}
+                className="px-4 py-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all flex items-center gap-2 border border-white/20"
+                title="Join a Game"
+              >
+                <Gamepad2 size={20} className="text-white" />
+                <span className="font-black text-xs uppercase tracking-widest text-white">Join Game</span>
+              </button>
+              <button 
                 onClick={() => {
                   if (!canCreateMore) {
                     return showNotification("Free limit reached! Upgrade to Premium for more quizzes.", "error");
@@ -1614,11 +1625,11 @@ function HostView({ user, userProfile, onExit, showNotification }: {
                 if (customQuestions.some(q => !q.text || q.options.some(o => !o))) {
                   return showNotification("Please fill in all questions and options", "error");
                 }
-                createGame(customQuestions, quizTitle || "New Quiz");
+                saveQuiz();
               }}
               className="px-12 py-4 bg-green-500 text-white rounded-2xl font-black text-xl flex items-center gap-2 shadow-xl hover:scale-105 transition-all border-b-4 border-green-700 active:border-b-0 active:translate-y-1"
             >
-              <Save size={24} /> CREATE GAME
+              <Save size={24} /> SAVE GAME
             </button>
           </div>
         </div>
