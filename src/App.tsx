@@ -47,7 +47,7 @@ import {
   deleteField,
   writeBatch
 } from "./firebase";
-import { serverTimestamp, Timestamp } from "firebase/firestore";
+import { serverTimestamp, Timestamp, increment } from "firebase/firestore";
 
 // --- TYPES ---
 interface Question {
@@ -63,6 +63,13 @@ interface Player {
   score: number;
   lastAnswer?: number;
   isCorrect?: boolean;
+}
+
+interface UserData {
+  uid: string;
+  email: string;
+  plan: "free" | "premium";
+  quizCount: number;
 }
 
 interface GameState {
@@ -260,9 +267,37 @@ export default function App() {
 
 function MainApp() {
   const [user, setUser] = useState<any>(null);
+  const [userData, setUserData] = useState<UserData | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [view, setView] = useState<"landing" | "host" | "player">("landing");
   const [notification, setNotification] = useState<{ message: string; type: "error" | "info" | "success" } | null>(null);
+
+  useEffect(() => {
+    if (isAuthReady && user) {
+      const unsubscribe = onSnapshot(doc(db, "users", user.uid), async (snap) => {
+        if (snap.exists()) {
+          setUserData(snap.data() as UserData);
+        } else {
+          // Initialize user document
+          const newUserData: UserData = {
+            uid: user.uid,
+            email: user.email || "",
+            plan: "free",
+            quizCount: 0
+          };
+          try {
+            await setDoc(doc(db, "users", user.uid), newUserData);
+            setUserData(newUserData);
+          } catch (err) {
+            console.error("Error initializing user:", err);
+          }
+        }
+      });
+      return () => unsubscribe();
+    } else if (isAuthReady && !user) {
+      setUserData(null);
+    }
+  }, [isAuthReady, user?.uid]);
 
   useEffect(() => {
     if (isAuthReady) {
@@ -309,6 +344,16 @@ function MainApp() {
     }
   };
 
+  const handleUpgrade = async () => {
+    if (!user) return;
+    try {
+      await updateDoc(doc(db, "users", user.uid), { plan: "premium" });
+      showNotification("Upgraded to PREMIUM! Enjoy unlimited quizzes.", "success");
+    } catch (err) {
+      showNotification("Upgrade failed", "error");
+    }
+  };
+
   if (!isAuthReady) return <LoadingScreen message="Connecting to MindSpark..." />;
 
   if (view === "landing") {
@@ -320,7 +365,14 @@ function MainApp() {
               <img src={user.photoURL} alt={user.displayName} className="w-10 h-10 rounded-full border-2 border-white/20" referrerPolicy="no-referrer" />
               <div className="hidden sm:block">
                 <p className="text-xs font-bold opacity-60 uppercase">Logged in as</p>
-                <p className="text-sm font-black">{user.displayName}</p>
+                <p className="text-sm font-black flex items-center gap-2">
+                  {user.displayName}
+                  {userData?.plan === "premium" ? (
+                    <span className="bg-yellow-400 text-indigo-900 text-[10px] px-2 py-0.5 rounded-full font-black">PREMIUM</span>
+                  ) : (
+                    <span className="bg-gray-400 text-white text-[10px] px-2 py-0.5 rounded-full font-black">FREE</span>
+                  )}
+                </p>
               </div>
               <button onClick={handleLogout} className="ml-2 p-2 hover:bg-white/10 rounded-full transition-all">
                 <LogOut size={18} />
@@ -397,7 +449,13 @@ function MainApp() {
   return (
     <div className="min-h-screen bg-gray-100">
       {view === "host" ? (
-        <HostView user={user} onExit={() => setView("landing")} showNotification={showNotification} />
+        <HostView 
+          user={user} 
+          userData={userData}
+          onExit={() => setView("landing")} 
+          showNotification={showNotification} 
+          onUpgrade={handleUpgrade}
+        />
       ) : (
         <PlayerView user={user} onExit={() => setView("landing")} showNotification={showNotification} />
       )}
@@ -416,10 +474,12 @@ function MainApp() {
 }
 
 // --- HOST VIEW ---
-function HostView({ user, onExit, showNotification }: { 
+function HostView({ user, userData, onExit, showNotification, onUpgrade }: { 
   user: any, 
+  userData: UserData | null,
   onExit: () => void,
-  showNotification: (m: string, t?: "error" | "info" | "success") => void 
+  showNotification: (m: string, t?: "error" | "info" | "success") => void,
+  onUpgrade: () => void
 }) {
   const [game, setGame] = useState<GameState | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -442,8 +502,14 @@ function HostView({ user, onExit, showNotification }: {
   }, [answeredCount, players.length, game?.status, game?.pin]);
 
   const createGame = async (questions: Question[]) => {
+    if (userData && userData.plan === "free" && userData.quizCount >= 3) {
+      showNotification("Free plan limit reached (3 quizzes). Upgrade to Premium for unlimited!", "error");
+      return;
+    }
+
     const pin = Math.floor(100000 + Math.random() * 900000).toString();
     const gameRef = doc(db, "games", pin);
+    const userRef = doc(db, "users", user.uid);
     
     const newGame = {
       pin,
@@ -456,7 +522,12 @@ function HostView({ user, onExit, showNotification }: {
     };
 
     try {
-      await setDoc(gameRef, newGame);
+      const batch = writeBatch(db);
+      batch.set(gameRef, newGame);
+      batch.update(userRef, { quizCount: increment(1) });
+      
+      await batch.commit();
+
       localStorage.setItem("mindspark_active_pin", pin);
       localStorage.setItem("mindspark_user_role", "host");
       setGame({
@@ -574,8 +645,29 @@ function HostView({ user, onExit, showNotification }: {
             <button onClick={handleExit} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all">
               <LogOut size={24} />
             </button>
-            <h2 className="text-3xl font-black tracking-tighter">QUIZ CREATOR</h2>
-            <div className="w-12" />
+            <div className="text-center">
+              <h2 className="text-3xl font-black tracking-tighter uppercase">Quiz Creator</h2>
+              {userData && (
+                <div className="flex items-center justify-center gap-2 mt-1">
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-black uppercase ${userData.plan === 'premium' ? 'bg-yellow-400 text-indigo-900' : 'bg-white/20 text-white'}`}>
+                    {userData.plan} Plan
+                  </span>
+                  <span className="text-[10px] opacity-60 font-bold">
+                    {userData.quizCount} / {userData.plan === 'free' ? '3' : '∞'} Quizzes
+                  </span>
+                </div>
+              )}
+            </div>
+            {userData?.plan === "free" ? (
+              <button 
+                onClick={onUpgrade}
+                className="px-4 py-2 bg-yellow-400 text-indigo-900 rounded-xl font-black text-xs shadow-lg hover:scale-105 transition-all"
+              >
+                UPGRADE
+              </button>
+            ) : (
+              <div className="w-24" />
+            )}
           </div>
 
           <div className="space-y-6 mb-12">
