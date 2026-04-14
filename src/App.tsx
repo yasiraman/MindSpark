@@ -1072,8 +1072,12 @@ function HostView({ user, userProfile, onExit, showNotification }: {
   if (!game) return <LoadingScreen message="Initializing Online Game..." />;
 
   if (game.status === "lobby") {
+    const branding = game.branding;
     return (
-      <div className="min-h-screen bg-indigo-600 p-8 text-white flex flex-col">
+      <div 
+        className="min-h-screen p-8 text-white flex flex-col transition-colors duration-500"
+        style={{ backgroundColor: branding?.primaryColor || "#4f46e5" }}
+      >
         <div className="flex justify-between items-center mb-12">
           <div className="flex gap-2">
             <button onClick={handleBackToDashboard} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all flex items-center gap-2">
@@ -1083,10 +1087,13 @@ function HostView({ user, userProfile, onExit, showNotification }: {
               <Edit3 size={24} /> <span className="font-bold hidden sm:inline">EDIT QUIZ</span>
             </button>
           </div>
-          <div className="text-center">
-            <p className="text-indigo-200 font-bold uppercase tracking-widest text-sm mb-1">Join at MindSpark Online</p>
+          <div className="text-center flex flex-col items-center">
+            {branding?.logoUrl && (
+              <img src={branding.logoUrl} alt="Brand Logo" className="h-16 mb-4 object-contain" referrerPolicy="no-referrer" />
+            )}
+            <p className="text-white/60 font-bold uppercase tracking-widest text-sm mb-1">Join at MindSpark Online</p>
             <div className="bg-white text-indigo-900 px-10 py-4 rounded-3xl shadow-2xl inline-block">
-              <h2 className="text-6xl font-black tracking-tighter">{game.pin}</h2>
+              <h2 className="text-6xl font-black tracking-tighter" style={{ color: branding?.primaryColor || "#4f46e5" }}>{game.pin}</h2>
             </div>
           </div>
           <div className="flex items-center gap-3 bg-white/10 px-6 py-3 rounded-2xl">
@@ -1133,12 +1140,19 @@ function HostView({ user, userProfile, onExit, showNotification }: {
   }
 
   if (game.status === "playing" && game.currentQuestion) {
+    const branding = game.branding;
     return (
-      <div className="min-h-screen bg-indigo-900 flex flex-col p-8 text-white">
+      <div 
+        className="min-h-screen flex flex-col p-8 text-white transition-colors duration-500"
+        style={{ backgroundColor: branding?.primaryColor || "#312e81" }}
+      >
         <div className="flex justify-between items-center mb-8">
           <div className="bg-white/10 px-6 py-3 rounded-2xl font-bold text-xl">
             {game.questionIndex + 1} of {game.totalQuestions}
           </div>
+          {branding?.logoUrl && (
+            <img src={branding.logoUrl} alt="Brand Logo" className="h-10 object-contain" referrerPolicy="no-referrer" />
+          )}
           <div className="flex items-center gap-4">
             <div className="bg-white/10 px-6 py-3 rounded-2xl font-bold text-xl flex items-center gap-2">
               <Users size={20} /> {answeredCount} / {players.length}
@@ -1170,9 +1184,19 @@ function HostView({ user, userProfile, onExit, showNotification }: {
   }
 
   if (game.status === "results") {
+    const branding = game.branding;
     return (
-      <div className="min-h-screen bg-indigo-800 p-8 text-white flex flex-col">
-        <h2 className="text-4xl font-black text-center mb-12 uppercase tracking-widest">Question Results</h2>
+      <div 
+        className="min-h-screen p-8 text-white flex flex-col transition-colors duration-500"
+        style={{ backgroundColor: branding?.secondaryColor || "#3730a3" }}
+      >
+        <div className="flex justify-between items-center mb-8">
+          <div className="w-24" />
+          <h2 className="text-4xl font-black text-center uppercase tracking-widest">Question Results</h2>
+          {branding?.logoUrl ? (
+            <img src={branding.logoUrl} alt="Brand Logo" className="h-10 object-contain" referrerPolicy="no-referrer" />
+          ) : <div className="w-24" />}
+        </div>
         
         <div className="flex-1 max-w-2xl mx-auto w-full overflow-y-auto mb-8 bg-black/20 rounded-3xl p-8 backdrop-blur-md">
           <div className="space-y-4">
@@ -1204,9 +1228,16 @@ function HostView({ user, userProfile, onExit, showNotification }: {
   }
 
   if (game.status === "ended") {
+    const branding = game.branding;
     const leaderboard = [...players].sort((a, b) => b.score - a.score);
     return (
-      <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center justify-center">
+      <div 
+        className="min-h-screen p-8 text-white flex flex-col items-center justify-center transition-colors duration-500"
+        style={{ backgroundColor: branding?.primaryColor || "#312e81" }}
+      >
+        {branding?.logoUrl && (
+          <img src={branding.logoUrl} alt="Brand Logo" className="h-20 mb-8 object-contain" referrerPolicy="no-referrer" />
+        )}
         <Trophy size={128} className="text-yellow-400 mb-8 animate-bounce" />
         <h2 className="text-6xl font-black mb-12 tracking-tighter">FINAL PODIUM</h2>
         

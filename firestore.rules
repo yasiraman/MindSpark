@@ -52,7 +52,8 @@ service cloud.firestore {
              data.currentQuestionIndex is number &&
              data.totalQuestions is number &&
              data.questions is list &&
-             data.createdAt is timestamp;
+             data.createdAt is timestamp &&
+             (!('branding' in data) || data.branding is map);
     }
 
     function isValidPlayer(data) {
@@ -74,7 +75,8 @@ service cloud.firestore {
 
     function isValidUser(data) {
       return data.uid is string &&
-             data.isPremium is bool;
+             data.isPremium is bool &&
+             (!('branding' in data) || data.branding is map);
     }
 
     // ===============================================================

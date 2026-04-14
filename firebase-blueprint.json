@@ -18,6 +18,10 @@
         "questions": {
           "type": "array",
           "description": "List of quiz questions."
+        },
+        "branding": {
+          "type": "object",
+          "description": "Custom branding settings for the game session."
         }
       },
       "required": ["pin", "status", "hostId", "currentQuestionIndex", "totalQuestions", "createdAt", "questions"]
@@ -57,6 +61,15 @@
       "properties": {
         "uid": { "type": "string", "description": "User ID." },
         "isPremium": { "type": "boolean", "description": "Whether the user has a premium subscription." },
+        "branding": {
+          "type": "object",
+          "properties": {
+            "logoUrl": { "type": "string", "description": "URL to custom logo." },
+            "primaryColor": { "type": "string", "description": "Primary brand color (hex)." },
+            "secondaryColor": { "type": "string", "description": "Secondary brand color (hex)." }
+          },
+          "description": "Custom branding settings."
+        },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Last update timestamp." }
       },
       "required": ["uid", "isPremium"]
