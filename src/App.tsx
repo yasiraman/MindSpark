@@ -97,6 +97,9 @@ interface Quiz {
 
 interface UserProfile {
   uid: string;
+  email?: string;
+  displayName?: string;
+  photoURL?: string;
   isPremium: boolean;
   premiumSource?: "purchase" | "admin";
   branding?: {
@@ -355,12 +358,29 @@ function MainApp() {
     }
     const unsubscribe = onSnapshot(doc(db, "users", user.uid), (snap) => {
       if (snap.exists()) {
-        setUserProfile(snap.data() as UserProfile);
+        const data = snap.data() as UserProfile;
+        setUserProfile(data);
+        // Sync info if missing or changed
+        const updates: any = {};
+        if (!data.email && user.email) updates.email = user.email;
+        if (!data.displayName && user.displayName) updates.displayName = user.displayName;
+        if (!data.photoURL && user.photoURL) updates.photoURL = user.photoURL;
+        
+        if (Object.keys(updates).length > 0) {
+          updateDoc(doc(db, "users", user.uid), { ...updates, updatedAt: serverTimestamp() });
+        }
       } else {
         // Create initial profile
-        const initialProfile = { uid: user.uid, isPremium: false };
+        const initialProfile = { 
+          uid: user.uid, 
+          email: user.email || "",
+          displayName: user.displayName || "",
+          photoURL: user.photoURL || "",
+          isPremium: false,
+          updatedAt: serverTimestamp()
+        };
         setDoc(doc(db, "users", user.uid), initialProfile);
-        setUserProfile(initialProfile);
+        setUserProfile(initialProfile as any);
       }
     });
     return () => unsubscribe();
@@ -1220,9 +1240,16 @@ function HostView({ user, userProfile, onExit, onJoinGame, showNotification }: {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-      const q = query(collection(db, "users"), orderBy("updatedAt", "desc"));
+      const q = collection(db, "users");
       const unsubscribe = onSnapshot(q, (snap) => {
-        setAllUsers(snap.docs.map(d => d.data() as UserProfile));
+        const users = snap.docs.map(d => d.data() as UserProfile);
+        // Sort by updatedAt desc client-side
+        users.sort((a, b) => {
+          const timeA = a.updatedAt?.toMillis() || 0;
+          const timeB = b.updatedAt?.toMillis() || 0;
+          return timeB - timeA;
+        });
+        setAllUsers(users);
         setLoading(false);
       }, (err) => handleFirestoreError(err, OperationType.LIST, "users"));
       return () => unsubscribe();
@@ -1262,11 +1289,26 @@ function HostView({ user, userProfile, onExit, onJoinGame, showNotification }: {
             <div className="w-12" />
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+            <div className="bg-white/10 p-6 rounded-3xl border border-white/10 backdrop-blur-md">
+              <p className="text-indigo-300 font-black uppercase text-[10px] mb-1">Total Users</p>
+              <p className="text-4xl font-black">{allUsers.length}</p>
+            </div>
+            <div className="bg-white/10 p-6 rounded-3xl border border-white/10 backdrop-blur-md">
+              <p className="text-indigo-300 font-black uppercase text-[10px] mb-1">Premium Users</p>
+              <p className="text-4xl font-black text-yellow-400">{allUsers.filter(u => u.isPremium).length}</p>
+            </div>
+            <div className="bg-white/10 p-6 rounded-3xl border border-white/10 backdrop-blur-md">
+              <p className="text-indigo-300 font-black uppercase text-[10px] mb-1">Free Users</p>
+              <p className="text-4xl font-black opacity-60">{allUsers.filter(u => !u.isPremium).length}</p>
+            </div>
+          </div>
+
           <div className="bg-white/10 rounded-3xl border border-white/10 overflow-hidden backdrop-blur-md">
             <table className="w-full text-left">
               <thead className="bg-white/5">
                 <tr>
-                  <th className="p-6 font-black uppercase text-xs text-indigo-300">User UID</th>
+                  <th className="p-6 font-black uppercase text-xs text-indigo-300">User</th>
                   <th className="p-6 font-black uppercase text-xs text-indigo-300">Status</th>
                   <th className="p-6 font-black uppercase text-xs text-indigo-300">Source</th>
                   <th className="p-6 font-black uppercase text-xs text-indigo-300">Last Seen</th>
@@ -1276,7 +1318,22 @@ function HostView({ user, userProfile, onExit, onJoinGame, showNotification }: {
               <tbody className="divide-y divide-white/5">
                 {allUsers.map(u => (
                   <tr key={u.uid} className="hover:bg-white/5 transition-all">
-                    <td className="p-6 font-mono text-xs opacity-60">{u.uid}</td>
+                    <td className="p-6">
+                      <div className="flex items-center gap-3">
+                        {u.photoURL ? (
+                          <img src={u.photoURL} alt="" className="w-10 h-10 rounded-full border border-white/20" referrerPolicy="no-referrer" />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
+                            <UserIcon size={20} className="opacity-40" />
+                          </div>
+                        )}
+                        <div className="flex flex-col">
+                          <span className="font-bold text-sm">{u.displayName || "Anonymous User"}</span>
+                          <span className="text-xs opacity-60">{u.email || "No Email"}</span>
+                          <span className="font-mono text-[10px] opacity-30">{u.uid}</span>
+                        </div>
+                      </div>
+                    </td>
                     <td className="p-6">
                       <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${u.isPremium ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30" : "bg-white/10 text-white/40"}`}>
                         {u.isPremium ? "Premium" : "Free"}
