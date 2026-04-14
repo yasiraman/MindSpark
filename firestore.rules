@@ -64,9 +64,35 @@ service cloud.firestore {
              (!('isCorrect' in data) || data.isCorrect is bool);
     }
 
+    function isValidQuiz(data) {
+      return data.id is string &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 100 &&
+             data.hostId is string &&
+             data.questions is list &&
+             data.createdAt is timestamp;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
+
+    match /quizzes/{quizId} {
+      // Users can only see their own quizzes
+      allow read: if isOwner(resource.data.hostId);
+      
+      // Users can create quizzes where they are the host
+      allow create: if isAuthenticated() && 
+                      isValidQuiz(request.resource.data) && 
+                      request.resource.data.hostId == request.auth.uid;
+      
+      // Users can update their own quizzes
+      allow update: if isOwner(resource.data.hostId) && 
+                      isValidQuiz(request.resource.data) &&
+                      request.resource.data.hostId == request.auth.uid;
+
+      // Users can delete their own quizzes
+      allow delete: if isOwner(resource.data.hostId);
+    }
 
     match /games/{pin} {
       // Anyone authenticated can read a game (to join or watch)

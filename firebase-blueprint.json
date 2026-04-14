@@ -35,6 +35,20 @@
         "joinedAt": { "type": "string", "format": "date-time", "description": "When the player joined the game." }
       },
       "required": ["id", "name", "score", "joinedAt"]
+    },
+    "Quiz": {
+      "title": "Quiz",
+      "description": "A saved quiz template.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique ID of the quiz." },
+        "title": { "type": "string", "description": "Title of the quiz." },
+        "description": { "type": "string", "description": "Optional description." },
+        "hostId": { "type": "string", "description": "UID of the creator." },
+        "questions": { "type": "array", "description": "List of questions." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the quiz was created." }
+      },
+      "required": ["id", "title", "hostId", "questions", "createdAt"]
     }
   },
   "firestore": {
@@ -45,6 +59,10 @@
     "/games/{pin}/players/{playerId}": {
       "schema": "Player",
       "description": "Sub-collection of players in a game."
+    },
+    "/quizzes/{quizId}": {
+      "schema": "Quiz",
+      "description": "Collection of saved quizzes."
     }
   }
 }

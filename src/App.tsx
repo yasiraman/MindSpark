@@ -65,6 +65,15 @@ interface Player {
   isCorrect?: boolean;
 }
 
+interface Quiz {
+  id: string;
+  title: string;
+  description?: string;
+  hostId: string;
+  questions: Question[];
+  createdAt: any;
+}
+
 interface GameState {
   pin: string;
   status: "lobby" | "playing" | "results" | "ended";
@@ -423,14 +432,35 @@ function HostView({ user, onExit, showNotification }: {
 }) {
   const [game, setGame] = useState<GameState | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
-  const [isCreating, setIsCreating] = useState(true);
+  const [hostMode, setHostMode] = useState<"dashboard" | "creator" | "game">("dashboard");
+  const [quizzes, setQuizzes] = useState<Quiz[]>([]);
+  const [editingQuiz, setEditingQuiz] = useState<Quiz | null>(null);
   const [customQuestions, setCustomQuestions] = useState<Question[]>(DEFAULT_QUESTIONS);
+  const [quizTitle, setQuizTitle] = useState("");
 
   const handleExit = () => {
     localStorage.removeItem("mindspark_active_pin");
     localStorage.removeItem("mindspark_user_role");
     onExit();
   };
+
+  const handleBackToDashboard = () => {
+    localStorage.removeItem("mindspark_active_pin");
+    localStorage.removeItem("mindspark_user_role");
+    setGame(null);
+    setHostMode("dashboard");
+  };
+
+  // Fetch Quizzes
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, "quizzes"), where("hostId", "==", user.uid), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const qList = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Quiz));
+      setQuizzes(qList);
+    }, (err) => handleFirestoreError(err, OperationType.LIST, "quizzes"));
+    return () => unsubscribe();
+  }, [user?.uid]);
 
   const answeredCount = players.filter(p => p.lastAnswer !== null && p.lastAnswer !== undefined).length;
 
@@ -464,9 +494,44 @@ function HostView({ user, onExit, showNotification }: {
         createdAt: new Date() as any,
         players: []
       } as any);
-      setIsCreating(false);
+      setHostMode("game");
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `games/${pin}`);
+    }
+  };
+
+  const saveQuiz = async () => {
+    if (!quizTitle.trim()) return showNotification("Please enter a quiz title", "error");
+    const quizId = editingQuiz?.id || uuidv4();
+    const quizRef = doc(db, "quizzes", quizId);
+    
+    const quizData = {
+      id: quizId,
+      title: quizTitle,
+      hostId: user.uid,
+      questions: customQuestions,
+      createdAt: editingQuiz?.createdAt || serverTimestamp()
+    };
+
+    try {
+      await setDoc(quizRef, quizData);
+      showNotification("Quiz saved successfully!", "success");
+      setHostMode("dashboard");
+      setEditingQuiz(null);
+      setQuizTitle("");
+      setCustomQuestions(DEFAULT_QUESTIONS);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `quizzes/${quizId}`);
+    }
+  };
+
+  const deleteQuiz = async (id: string) => {
+    if (!window.confirm("Are you sure you want to delete this quiz?")) return;
+    try {
+      await deleteDoc(doc(db, "quizzes", id));
+      showNotification("Quiz deleted", "info");
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `quizzes/${id}`);
     }
   };
 
@@ -528,7 +593,7 @@ function HostView({ user, onExit, showNotification }: {
               questions: data.questions,
               players: []
             } as any);
-            setIsCreating(false);
+            setHostMode("game");
           } else {
             handleExit();
           }
@@ -566,16 +631,113 @@ function HostView({ user, onExit, showNotification }: {
     return () => unsubscribe();
   }, [game?.pin]);
 
-  if (isCreating) {
+  if (hostMode === "dashboard") {
+    return (
+      <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center">
+        <div className="w-full max-w-4xl">
+          <div className="flex justify-between items-center mb-12">
+            <h1 className="text-4xl font-black tracking-tighter">HOST DASHBOARD</h1>
+            <div className="flex gap-4">
+              <button 
+                onClick={() => {
+                  setEditingQuiz(null);
+                  setQuizTitle("");
+                  setCustomQuestions(DEFAULT_QUESTIONS);
+                  setHostMode("creator");
+                }}
+                className="px-6 py-3 bg-indigo-600 rounded-xl font-black flex items-center gap-2 hover:scale-105 transition-all"
+              >
+                <Plus size={20} /> NEW QUIZ
+              </button>
+              <button onClick={handleExit} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all">
+                <LogOut size={24} />
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {quizzes.map(quiz => (
+              <motion.div 
+                key={quiz.id}
+                layoutId={quiz.id}
+                className="bg-white/10 p-6 rounded-3xl border border-white/10 backdrop-blur-md flex flex-col justify-between"
+              >
+                <div>
+                  <h3 className="text-2xl font-black mb-2">{quiz.title}</h3>
+                  <p className="text-indigo-200 opacity-60 mb-4">{quiz.questions.length} Questions</p>
+                </div>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => createGame(quiz.questions)}
+                    className="flex-1 py-3 bg-white text-indigo-900 rounded-xl font-black flex items-center justify-center gap-2 hover:bg-indigo-50 transition-all"
+                  >
+                    <Play size={18} /> START
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setEditingQuiz(quiz);
+                      setQuizTitle(quiz.title);
+                      setCustomQuestions(quiz.questions);
+                      setHostMode("creator");
+                    }}
+                    className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all"
+                  >
+                    <Edit3 size={18} />
+                  </button>
+                  <button 
+                    onClick={() => deleteQuiz(quiz.id)}
+                    className="p-3 bg-red-500/20 text-red-400 rounded-xl hover:bg-red-500/30 transition-all"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              </motion.div>
+            ))}
+            {quizzes.length === 0 && (
+              <div className="col-span-full py-20 text-center opacity-50">
+                <Layout size={64} className="mx-auto mb-4 opacity-20" />
+                <p className="text-xl font-bold">No quizzes yet. Create your first one!</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (hostMode === "creator") {
     return (
       <div className="min-h-screen bg-indigo-900 p-8 text-white flex flex-col items-center">
         <div className="w-full max-w-4xl">
           <div className="flex justify-between items-center mb-8">
-            <button onClick={handleExit} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all">
-              <LogOut size={24} />
+            <button onClick={() => setHostMode("dashboard")} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all">
+              <ChevronRight size={24} className="rotate-180" />
             </button>
-            <h2 className="text-3xl font-black tracking-tighter">QUIZ CREATOR</h2>
-            <div className="w-12" />
+            <h2 className="text-3xl font-black tracking-tighter">{editingQuiz ? "EDIT QUIZ" : "NEW QUIZ"}</h2>
+            <div className="flex gap-2">
+              <button 
+                onClick={saveQuiz}
+                className="px-6 py-3 bg-green-600 rounded-xl font-black flex items-center gap-2 hover:scale-105 transition-all"
+              >
+                <Save size={20} /> SAVE
+              </button>
+              <button 
+                onClick={() => createGame(customQuestions)}
+                className="px-6 py-3 bg-indigo-600 rounded-xl font-black flex items-center gap-2 hover:scale-105 transition-all"
+              >
+                <Play size={20} /> START
+              </button>
+            </div>
+          </div>
+
+          <div className="mb-8">
+            <input 
+              type="text"
+              placeholder="Quiz Title"
+              value={quizTitle}
+              onChange={(e) => setQuizTitle(e.target.value)}
+              className="w-full p-6 bg-white/10 rounded-3xl text-3xl font-black outline-none focus:ring-4 ring-indigo-500 transition-all border border-white/10"
+            />
           </div>
 
           <div className="space-y-6 mb-12">
@@ -672,10 +834,10 @@ function HostView({ user, onExit, showNotification }: {
       <div className="min-h-screen bg-indigo-600 p-8 text-white flex flex-col">
         <div className="flex justify-between items-center mb-12">
           <div className="flex gap-2">
-            <button onClick={handleExit} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all">
-              <LogOut size={24} />
+            <button onClick={handleBackToDashboard} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all flex items-center gap-2">
+              <Layout size={24} /> <span className="font-bold hidden sm:inline">DASHBOARD</span>
             </button>
-            <button onClick={() => setIsCreating(true)} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all flex items-center gap-2">
+            <button onClick={() => setHostMode("creator")} className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-all flex items-center gap-2">
               <Edit3 size={24} /> <span className="font-bold hidden sm:inline">EDIT QUIZ</span>
             </button>
           </div>
