@@ -130,6 +130,7 @@ interface GameState {
   correctAnswer?: number;
   leaderboard?: Player[];
   hostId: string;
+  quizTitle: string;
   questions: Question[];
   branding?: {
     logoUrl?: string;
@@ -605,7 +606,7 @@ function HostView({ user, userProfile, onExit, showNotification }: {
     const summary: GameSummary = {
       id: summaryId,
       quizId: game.pin,
-      quizTitle: quizTitle || "Untitled Quiz",
+      quizTitle: game.quizTitle || "Untitled Quiz",
       hostId: user.uid,
       playerCount: players.length,
       avgScore,
@@ -641,7 +642,7 @@ function HostView({ user, userProfile, onExit, showNotification }: {
     }
   }, [answeredCount, players.length, game?.status, game?.pin]);
 
-  const createGame = async (questions: Question[]) => {
+  const createGame = async (questions: Question[], title: string) => {
     const pin = Math.floor(100000 + Math.random() * 900000).toString();
     const gameRef = doc(db, "games", pin);
     
@@ -649,6 +650,7 @@ function HostView({ user, userProfile, onExit, showNotification }: {
       pin,
       status: "lobby",
       hostId: user.uid,
+      quizTitle: title,
       currentQuestionIndex: 0,
       totalQuestions: questions.length,
       createdAt: serverTimestamp(),
@@ -770,6 +772,7 @@ function HostView({ user, userProfile, onExit, showNotification }: {
               pin: savedPin,
               status: data.status,
               hostId: data.hostId,
+              quizTitle: data.quizTitle || "Untitled Quiz",
               questionIndex: data.currentQuestionIndex,
               totalQuestions: data.totalQuestions,
               questions: data.questions,
@@ -1054,18 +1057,29 @@ function HostView({ user, userProfile, onExit, showNotification }: {
 
                   <div>
                     <h4 className="text-xs font-black uppercase tracking-widest text-indigo-300 mb-4 flex items-center gap-2">
-                      <Trophy size={14} /> Final Leaderboard
+                      <Trophy size={14} /> Full Player Report
                     </h4>
                     <div className="space-y-2">
                       {selectedSummary.leaderboard?.map((p, idx) => (
-                        <div key={p.id} className="flex items-center justify-between p-4 bg-white/5 rounded-xl border border-white/5">
-                          <div className="flex items-center gap-4">
-                            <span className={`w-8 h-8 flex items-center justify-center rounded-full font-black text-sm ${idx === 0 ? "bg-yellow-500 text-indigo-900" : idx === 1 ? "bg-gray-300 text-indigo-900" : idx === 2 ? "bg-amber-600 text-white" : "bg-white/10 text-white"}`}>
-                              {idx + 1}
-                            </span>
-                            <span className="font-bold">{p.name}</span>
+                        <div key={p.id} className="p-4 bg-white/5 rounded-xl border border-white/5">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-4">
+                              <span className={`w-8 h-8 flex items-center justify-center rounded-full font-black text-sm ${idx === 0 ? "bg-yellow-500 text-indigo-900" : idx === 1 ? "bg-gray-300 text-indigo-900" : idx === 2 ? "bg-amber-600 text-white" : "bg-white/10 text-white"}`}>
+                                {idx + 1}
+                              </span>
+                              <span className="font-bold">{p.name}</span>
+                            </div>
+                            <span className="font-black text-indigo-400">{p.score} pts</span>
                           </div>
-                          <span className="font-black text-indigo-400">{p.score} pts</span>
+                          <div className="flex gap-1">
+                            {selectedSummary.questionStats.map((_, qIdx) => (
+                              <div 
+                                key={qIdx}
+                                className={`h-1 flex-1 rounded-full ${p.score > 0 ? "bg-green-500/50" : "bg-red-500/50"}`}
+                                title={`Question ${qIdx + 1}`}
+                              />
+                            ))}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1453,7 +1467,7 @@ function HostView({ user, userProfile, onExit, showNotification }: {
                 </div>
                 <div className="flex gap-2">
                   <button 
-                    onClick={() => createGame(quiz.questions)}
+                    onClick={() => createGame(quiz.questions, quiz.title)}
                     className="flex-1 py-3 bg-white text-indigo-900 rounded-xl font-black flex items-center justify-center gap-2 hover:bg-indigo-50 transition-all"
                   >
                     <Play size={18} /> START
@@ -1507,7 +1521,7 @@ function HostView({ user, userProfile, onExit, showNotification }: {
                 <Save size={20} /> SAVE
               </button>
               <button 
-                onClick={() => createGame(customQuestions)}
+                onClick={() => createGame(customQuestions, quizTitle || "New Quiz")}
                 className="px-6 py-3 bg-indigo-600 rounded-xl font-black flex items-center gap-2 hover:scale-105 transition-all"
               >
                 <Play size={20} /> START
@@ -1600,7 +1614,7 @@ function HostView({ user, userProfile, onExit, showNotification }: {
                 if (customQuestions.some(q => !q.text || q.options.some(o => !o))) {
                   return showNotification("Please fill in all questions and options", "error");
                 }
-                createGame(customQuestions);
+                createGame(customQuestions, quizTitle || "New Quiz");
               }}
               className="px-12 py-4 bg-green-500 text-white rounded-2xl font-black text-xl flex items-center gap-2 shadow-xl hover:scale-105 transition-all border-b-4 border-green-700 active:border-b-0 active:translate-y-1"
             >
